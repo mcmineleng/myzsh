@@ -1,0 +1,430 @@
+#!/bin/bash
+
+# 定义基础目录
+MYZSH_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/myzsh"
+THEMES_DIR="${MYZSH_DATA_HOME}/themes"
+PLUGINS_DIR="${MYZSH_DATA_HOME}/plugins"
+CONFIG_DIR="${MYZSH_DATA_HOME}/config"
+CONFIG_MYZSH_DIR="${CONFIG_DIR}/myzsh"  # 实际加载配置的目录
+EDITOR_FILE="${CONFIG_MYZSH_DIR}/edit"
+
+# 确保目录存在
+ensure_dirs() {
+    mkdir -p "${THEMES_DIR}"
+    mkdir -p "${PLUGINS_DIR}"
+    mkdir -p "${CONFIG_DIR}"
+    mkdir -p "${CONFIG_MYZSH_DIR}"  # 确保 myzsh 子目录存在
+}
+
+# 确保配置文件存在
+ensure_config_files() {
+    ensure_dirs
+    if [[ ! -f "${EDITOR_FILE}" ]]; then
+        echo "EDITOR=${EDITOR:-vi}" > "${EDITOR_FILE}"
+    fi
+}
+
+# 获取编辑器命令
+get_editor() {
+    if [[ -f "${EDITOR_FILE}" ]]; then
+        source "${EDITOR_FILE}" 2>/dev/null || true
+        echo "${EDITOR}"
+    else
+        echo "${EDITOR:-vi}"
+    fi
+}
+
+# 设置编辑器
+set_editor() {
+    local editor_cmd="$1"
+    
+    if [[ -z "${editor_cmd}" ]]; then
+        echo "错误: 请指定编辑器命令或路径"
+        echo "用法: myzsh edit set <编辑器命令或路径>"
+        return 1
+    fi
+    
+    ensure_config_files
+    echo "EDITOR=${editor_cmd}" > "${EDITOR_FILE}"
+    echo "编辑器已设置为: ${editor_cmd}"
+}
+
+# 编辑配置文件
+edit_config() {
+    local config_path="$1"
+    
+    if [[ -z "${config_path}" ]]; then
+        echo "错误: 请指定配置文件路径"
+        echo "用法: myzsh edit <路径>"
+        echo "提示: 路径相对于 ${CONFIG_DIR}/"
+        echo "例如: myzsh edit myzsh/theme"
+        echo "      myzsh edit myzsh/plugins"
+        echo "      myzsh edit custom/myconfig.conf"
+        return 1
+    fi
+    
+    ensure_dirs
+    
+    local editor_cmd=$(get_editor)
+    local full_path="${CONFIG_DIR}/${config_path}"
+    local dir_path=$(dirname "${full_path}")
+    
+    # 确保目录存在
+    mkdir -p "${dir_path}"
+    
+    # 如果文件不存在，创建空文件
+    if [[ ! -f "${full_path}" ]]; then
+        touch "${full_path}"
+        echo "已创建新文件: ${full_path}"
+    fi
+    
+    echo "正在编辑: ${full_path}"
+    echo "使用编辑器: ${editor_cmd}"
+    ${editor_cmd} "${full_path}"
+}
+
+# 克隆仓库（仅最新版本）
+clone_repo() {
+    local repo_url="$1"
+    local target_dir="$2"
+    local repo_name
+    
+    repo_name=$(basename "${repo_url}" .git)
+    
+    if [[ -d "${target_dir}/${repo_name}" ]]; then
+        echo "目录已存在: ${target_dir}/${repo_name}"
+        read -p "是否更新? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo "正在更新..."
+            (cd "${target_dir}/${repo_name}" && git pull --depth=1)
+            echo "更新完成!"
+        else
+            echo "跳过更新"
+        fi
+    else
+        echo "正在克隆 ${repo_name}..."
+        git clone --depth=1 "${repo_url}" "${target_dir}/${repo_name}"
+        echo "克隆完成!"
+    fi
+}
+
+# 安装主题
+install_theme() {
+    local repo_url="$1"
+    ensure_dirs
+    clone_repo "${repo_url}" "${THEMES_DIR}"
+}
+
+# 安装插件
+install_plugin() {
+    local repo_url="$1"
+    ensure_dirs
+    clone_repo "${repo_url}" "${PLUGINS_DIR}"
+}
+
+# 设置主题
+set_theme() {
+    local theme_name="$1"
+    
+    if [[ -z "${theme_name}" ]]; then
+        echo "错误: 请指定主题名称"
+        echo "用法: myzsh theme set <主题名>"
+        return 1
+    fi
+    
+    ensure_config_files
+    echo "ZSH_THEME=${theme_name}" > "${CONFIG_MYZSH_DIR}/theme"
+    echo "主题已设置为: ${theme_name}"
+}
+
+# 设置主题配置文件路径
+set_theme_config() {
+    local config_path="$1"
+    
+    if [[ -z "${config_path}" ]]; then
+        echo "错误: 请指定配置文件路径"
+        echo "用法: myzsh theme config <路径>"
+        return 1
+    fi
+    
+    ensure_config_files
+    echo "ZSH_THEME_CONFIG=${config_path}" > "${CONFIG_MYZSH_DIR}/theme_config"
+    echo "主题配置文件路径已设置为: ${config_path}"
+}
+
+# 获取当前插件列表
+get_plugins() {
+    if [[ -f "${CONFIG_MYZSH_DIR}/plugins" ]]; then
+        source "${CONFIG_MYZSH_DIR}/plugins" 2>/dev/null || true
+        echo "${plugins[@]}"
+    fi
+}
+
+# 写入插件列表
+write_plugins() {
+    local plugins_array=("$@")
+    local plugins_str
+    plugins_str=$(printf "'%s' " "${plugins_array[@]}")
+    plugins_str="${plugins_str% }"
+    echo "plugins=(${plugins_str})" > "${CONFIG_MYZSH_DIR}/plugins"
+}
+
+# 添加插件
+add_plugins() {
+    if [[ $# -eq 0 ]]; then
+        echo "错误: 请指定要添加的插件名称"
+        echo "用法: myzsh plugin add <插件名1> [插件名2] ..."
+        return 1
+    fi
+    
+    ensure_config_files
+    
+    # 读取当前插件列表
+    local current_plugins=()
+    if [[ -f "${CONFIG_MYZSH_DIR}/plugins" ]]; then
+        source "${CONFIG_MYZSH_DIR}/plugins" 2>/dev/null || true
+        current_plugins=("${plugins[@]}")
+    fi
+    
+    # 添加新插件（去重）
+    local added=()
+    local new_plugins=("${current_plugins[@]}")
+    for plugin in "$@"; do
+        if [[ ! " ${new_plugins[@]} " =~ " ${plugin} " ]]; then
+            new_plugins+=("${plugin}")
+            added+=("${plugin}")
+        fi
+    done
+    
+    if [[ ${#added[@]} -eq 0 ]]; then
+        echo "所有插件已存在，无需添加"
+        return 0
+    fi
+    
+    write_plugins "${new_plugins[@]}"
+    echo "已添加插件: ${added[*]}"
+}
+
+# 移除插件
+remove_plugins() {
+    if [[ $# -eq 0 ]]; then
+        echo "错误: 请指定要移除的插件名称"
+        echo "用法: myzsh plugin remove <插件名1> [插件名2] ..."
+        return 1
+    fi
+    
+    ensure_config_files
+    
+    # 读取当前插件列表
+    local current_plugins=()
+    if [[ -f "${CONFIG_MYZSH_DIR}/plugins" ]]; then
+        source "${CONFIG_MYZSH_DIR}/plugins" 2>/dev/null || true
+        current_plugins=("${plugins[@]}")
+    fi
+    
+    # 移除插件
+    local removed=()
+    local new_plugins=()
+    for plugin in "${current_plugins[@]}"; do
+        local should_remove=false
+        for remove_plugin in "$@"; do
+            if [[ "${plugin}" == "${remove_plugin}" ]]; then
+                should_remove=true
+                removed+=("${plugin}")
+                break
+            fi
+        done
+        if [[ "${should_remove}" == false ]]; then
+            new_plugins+=("${plugin}")
+        fi
+    done
+    
+    if [[ ${#removed[@]} -eq 0 ]]; then
+        echo "未找到要移除的插件: $*"
+        return 1
+    fi
+    
+    write_plugins "${new_plugins[@]}"
+    echo "已移除插件: ${removed[*]}"
+}
+
+# 列出已安装的插件
+list_plugins() {
+    ensure_config_files
+    
+    echo "已安装的插件:"
+    if [[ -f "${CONFIG_MYZSH_DIR}/plugins" ]]; then
+        source "${CONFIG_MYZSH_DIR}/plugins" 2>/dev/null || true
+        if [[ ${#plugins[@]} -eq 0 ]]; then
+            echo "  (无)"
+        else
+            for plugin in "${plugins[@]}"; do
+                echo "  - ${plugin}"
+            done
+        fi
+    else
+        echo "  (无)"
+    fi
+}
+
+# 显示帮助信息
+show_help() {
+    cat << EOF
+用法: myzsh <命令> [参数]
+
+命令:
+    install theme <仓库地址>    安装主题
+    install plugin <仓库地址>   安装插件
+    theme set <主题名>          设置当前主题
+    theme config <路径>         设置主题配置文件路径
+    plugin add <插件名>...      启用已安装的插件
+    plugin remove <插件名>...   移除已启用的插件
+    plugin list                 列出已启用的插件
+    edit <路径>                 编辑配置文件（路径相对于 ${CONFIG_DIR}/）
+    edit set <编辑器命令>       设置默认编辑器
+    help                        显示此帮助信息
+
+配置文件加载目录:
+    ${CONFIG_MYZSH_DIR}/         (myzsh 加载配置的目录)
+
+配置文件示例:
+    myzsh edit myzsh/theme          # 编辑主题设置
+    myzsh edit myzsh/theme_config   # 编辑主题配置路径
+    myzsh edit myzsh/plugins        # 编辑插件列表
+    myzsh edit myzsh/edit           # 编辑编辑器设置
+    myzsh edit custom/my.conf       # 编辑自定义配置文件
+
+示例:
+    myzsh install theme https://github.com/user/theme-repo.git
+    myzsh install plugin https://github.com/user/plugin-repo.git
+    myzsh theme set mytheme
+    myzsh theme config /path/to/theme.config
+    myzsh plugin add git zsh-autosuggestions
+    myzsh plugin remove git
+    myzsh plugin list
+    myzsh edit myzsh/plugins
+    myzsh edit myzsh/theme
+    myzsh edit set vim
+    myzsh edit set /usr/bin/nano
+    myzsh edit custom/myconfig.conf
+EOF
+}
+
+# 主函数
+main() {
+    if [[ $# -lt 1 ]]; then
+        show_help
+        return 1
+    fi
+    
+    local cmd="$1"
+    shift
+    
+    case "${cmd}" in
+        install)
+            if [[ $# -lt 2 ]]; then
+                echo "错误: install 需要指定类型和仓库地址"
+                echo "用法: myzsh install <theme|plugin> <仓库地址>"
+                return 1
+            fi
+            local type="$1"
+            local repo_url="$2"
+            case "${type}" in
+                theme)
+                    install_theme "${repo_url}"
+                    ;;
+                plugin)
+                    install_plugin "${repo_url}"
+                    ;;
+                *)
+                    echo "错误: 未知安装类型 '${type}'"
+                    echo "可用类型: theme, plugin"
+                    return 1
+                    ;;
+            esac
+            ;;
+        theme)
+            if [[ $# -lt 2 ]]; then
+                echo "错误: theme 需要指定子命令和参数"
+                echo "用法: myzsh theme <set|config> <参数>"
+                return 1
+            fi
+            local subcmd="$1"
+            local arg="$2"
+            case "${subcmd}" in
+                set)
+                    set_theme "${arg}"
+                    ;;
+                config)
+                    set_theme_config "${arg}"
+                    ;;
+                *)
+                    echo "错误: 未知 theme 子命令 '${subcmd}'"
+                    echo "可用子命令: set, config"
+                    return 1
+                    ;;
+            esac
+            ;;
+        plugin)
+            if [[ $# -lt 1 ]]; then
+                echo "错误: plugin 需要指定子命令"
+                echo "可用子命令: add, remove, list"
+                return 1
+            fi
+            local subcmd="$1"
+            shift
+            case "${subcmd}" in
+                add)
+                    add_plugins "$@"
+                    ;;
+                remove)
+                    remove_plugins "$@"
+                    ;;
+                list)
+                    list_plugins
+                    ;;
+                *)
+                    echo "错误: 未知 plugin 子命令 '${subcmd}'"
+                    echo "可用子命令: add, remove, list"
+                    return 1
+                    ;;
+            esac
+            ;;
+        edit)
+            if [[ $# -lt 1 ]]; then
+                echo "错误: edit 需要指定子命令或配置文件路径"
+                echo "用法: myzsh edit <路径> 或 myzsh edit set <编辑器命令>"
+                return 1
+            fi
+            local subcmd="$1"
+            shift
+            case "${subcmd}" in
+                set)
+                    if [[ $# -lt 1 ]]; then
+                        echo "错误: 请指定编辑器命令"
+                        echo "用法: myzsh edit set <编辑器命令>"
+                        return 1
+                    fi
+                    set_editor "$1"
+                    ;;
+                *)
+                    # 将第一个参数作为配置文件路径
+                    edit_config "${subcmd}"
+                    ;;
+            esac
+            ;;
+        help|--help|-h)
+            show_help
+            ;;
+        *)
+            echo "错误: 未知命令 '${cmd}'"
+            echo "可用命令: install, theme, plugin, edit, help"
+            show_help
+            return 1
+            ;;
+    esac
+}
+
+# 执行主函数
+main "$@"
