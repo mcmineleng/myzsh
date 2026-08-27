@@ -1,11 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env zsh
 
 # 定义基础目录
-MYZSH_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/myzsh"
-THEMES_DIR="${MYZSH_DATA_HOME}/themes"
-PLUGINS_DIR="${MYZSH_DATA_HOME}/plugins"
-CONFIG_DIR="${MYZSH_DATA_HOME}/config"
-CONFIG_MYZSH_DIR="${CONFIG_DIR}/myzsh"  # 实际加载配置的目录
+MYZSH_DATA_HOME="$MYZSH_DIR"
+THEMES_DIR="${MYZSH_DIR}/themes"
+PLUGINS_DIR="${MYZSH_DIR}/plugins"
+CONFIG_DIR="${MYZSH_DIR}/config"
+CONFIG_MYZSH_DIR="${CONFIG_DIR}/myzsh"
 EDITOR_FILE="${CONFIG_MYZSH_DIR}/edit"
 
 # 确保目录存在
@@ -13,7 +13,7 @@ ensure_dirs() {
     mkdir -p "${THEMES_DIR}"
     mkdir -p "${PLUGINS_DIR}"
     mkdir -p "${CONFIG_DIR}"
-    mkdir -p "${CONFIG_MYZSH_DIR}"  # 确保 myzsh 子目录存在
+    mkdir -p "${CONFIG_MYZSH_DIR}"  # 确保子目录存在
 }
 
 # 确保配置文件存在
@@ -153,8 +153,8 @@ set_theme_config() {
     echo "主题配置文件路径已设置为: ${config_path}"
 }
 
-# 获取当前插件列表
-get_plugins() {
+# 获取当前启用插件列表
+get_enabled_plugins() {
     if [[ -f "${CONFIG_MYZSH_DIR}/plugins" ]]; then
         source "${CONFIG_MYZSH_DIR}/plugins" 2>/dev/null || true
         echo "${plugins[@]}"
@@ -168,6 +168,391 @@ write_plugins() {
     plugins_str=$(printf "'%s' " "${plugins_array[@]}")
     plugins_str="${plugins_str% }"
     echo "plugins=(${plugins_str})" > "${CONFIG_MYZSH_DIR}/plugins"
+}
+
+# 列出所有已安装的插件
+list_all_plugins() {
+    ensure_dirs
+    
+    # 获取已启用的插件列表
+    local enabled_plugins=()
+    if [[ -f "${CONFIG_MYZSH_DIR}/plugins" ]]; then
+        source "${CONFIG_MYZSH_DIR}/plugins" 2>/dev/null || true
+        enabled_plugins=("${plugins[@]}")
+    fi
+    
+    echo "所有已安装的插件:"
+    
+    # 检查插件目录
+    if [[ -d "${PLUGINS_DIR}" ]] && [[ -n "$(ls -A "${PLUGINS_DIR}" 2>/dev/null)" ]]; then
+        local disabled_plugins=()
+        local enabled_plugins_list=()
+        local enabled_count=0
+        local total_count=0
+        
+        # 分类插件
+        for plugin_dir in "${PLUGINS_DIR}"/*/; do
+            if [[ -d "${plugin_dir}" ]]; then
+                local plugin_name=$(basename "${plugin_dir}")
+                total_count=$((total_count + 1))
+                
+                # 检查是否已启用
+                local is_enabled=false
+                for enabled_plugin in "${enabled_plugins[@]}"; do
+                    if [[ "${plugin_name}" == "${enabled_plugin}" ]]; then
+                        is_enabled=true
+                        break
+                    fi
+                done
+                
+                if [[ "${is_enabled}" == true ]]; then
+                    enabled_plugins_list+=("${plugin_name}")
+                    enabled_count=$((enabled_count + 1))
+                else
+                    disabled_plugins+=("${plugin_name}")
+                fi
+            fi
+        done
+        
+        # 定义绿色输出
+        local GREEN='\033[0;32m'
+        local NC='\033[0m' # No Color
+        
+        # 显示未启用的插件（无颜色，○ 前缀）
+        for plugin in "${disabled_plugins[@]}"; do
+            echo "  ○ ${plugin}"
+        done
+        
+        # 显示已启用的插件（绿色，● 前缀）
+        for plugin in "${enabled_plugins_list[@]}"; do
+            echo -e "  ${GREEN}● ${plugin}${NC}"
+        done
+        
+        # 如果没有任何插件
+        if [[ ${total_count} -eq 0 ]]; then
+            echo "  (无已安装的插件)"
+        fi
+        
+        echo ""
+        echo "总计: ${total_count} 个插件 (已启用: ${enabled_count}, 未启用: $((total_count - enabled_count)))"
+    else
+        echo "  (无已安装的插件)"
+        echo ""
+        echo "总计: 0 个插件"
+    fi
+}
+
+# 列出已启用的插件
+list_enabled_plugins() {
+    ensure_config_files
+    
+    # 定义绿色输出
+    local GREEN='\033[0;32m'
+    local NC='\033[0m' # No Color
+    
+    echo "已启用的插件:"
+    if [[ -f "${CONFIG_MYZSH_DIR}/plugins" ]]; then
+        source "${CONFIG_MYZSH_DIR}/plugins" 2>/dev/null || true
+        if [[ ${#plugins[@]} -eq 0 ]]; then
+            echo "  (无)"
+            echo ""
+            echo "总计: 0 个插件"
+        else
+            local count=0
+            for plugin in "${plugins[@]}"; do
+                echo -e "  ${GREEN}● ${plugin}${NC}"
+                count=$((count + 1))
+            done
+            echo ""
+            echo "总计: ${count} 个插件"
+        fi
+    else
+        echo "  (无)"
+        echo ""
+        echo "总计: 0 个插件"
+    fi
+}
+
+# 列出插件（主函数）
+list_plugins() {
+    local mode="$1"
+    
+    case "${mode}" in
+        true|on|enable)
+            list_enabled_plugins
+            ;;
+        "")
+            list_all_plugins
+            ;;
+        *)
+            echo "错误: 未知参数 '${mode}'"
+            echo "用法: myzsh plugin list [true|on|enable]"
+            echo "  - 无参数: 列出所有已安装的插件"
+            echo "  - true/on/enable: 列出已启用的插件"
+            return 1
+            ;;
+    esac
+}
+
+# 交互式插件管理
+interactive_plugin_manager() {
+    ensure_dirs
+    
+    # 获取已启用的插件列表
+    local enabled_plugins=()
+    if [[ -f "${CONFIG_MYZSH_DIR}/plugins" ]]; then
+        source "${CONFIG_MYZSH_DIR}/plugins" 2>/dev/null || true
+        enabled_plugins=("${plugins[@]}")
+    fi
+    
+    # 获取所有插件
+    local all_plugins=()
+    local enabled_list=()
+    local disabled_list=()
+    
+    if [[ -d "${PLUGINS_DIR}" ]] && [[ -n "$(ls -A "${PLUGINS_DIR}" 2>/dev/null)" ]]; then
+        for plugin_dir in "${PLUGINS_DIR}"/*/; do
+            if [[ -d "${plugin_dir}" ]]; then
+                local plugin_name=$(basename "${plugin_dir}")
+                all_plugins+=("${plugin_name}")
+                
+                # 检查是否已启用
+                local is_enabled=false
+                for enabled_plugin in "${enabled_plugins[@]}"; do
+                    if [[ "${plugin_name}" == "${enabled_plugin}" ]]; then
+                        is_enabled=true
+                        break
+                    fi
+                done
+                
+                if [[ "${is_enabled}" == true ]]; then
+                    enabled_list+=("${plugin_name}")
+                else
+                    disabled_list+=("${plugin_name}")
+                fi
+            fi
+        done
+    fi
+    
+    # 重新排列：先显示已启用的，再显示未启用的
+    local display_plugins=()
+    local display_stat=()  # 1=已启用, 0=未启用
+    
+    # 先添加已启用的
+    for plugin in "${enabled_list[@]}"; do
+        display_plugins+=("${plugin}")
+        display_stat+=("1")
+    done
+    
+    # 再添加未启用的
+    for plugin in "${disabled_list[@]}"; do
+        display_plugins+=("${plugin}")
+        display_stat+=("0")
+    done
+    
+    if [[ ${#display_plugins[@]} -eq 0 ]]; then
+        echo "没有安装任何插件"
+        return 1
+    fi
+    
+    # 初始化选中状态：所有已启用的插件默认被选中
+    local selected=()
+    for ((i=1; i<=${#display_plugins[@]}; i++)); do
+        if [[ "${display_stat[$i]}" == "1" ]]; then
+            selected+=("$i")
+        fi
+    done
+    
+    # 初始选中第一个插件
+    local current_index=1
+    local total=${#display_plugins[@]}
+    
+    # 颜色定义
+    local GREEN='\033[0;32m'
+    local BLUE='\033[0;34m'
+    local YELLOW='\033[1;33m'
+    local NC='\033[0m'
+    local CLEAR='\033[2J\033[H'
+    
+    # 保存终端设置
+    stty -echo
+    tput smcup
+    
+    # 恢复光标
+    trap 'tput rmcup; stty echo; clear; exit' INT TERM
+    
+    # 获取终端行数
+    local term_lines=$(tput lines)
+    local header_lines=4  # 标题+提示+空行
+    local footer_lines=3  # 统计信息+空行
+    local max_display_lines=$((term_lines - header_lines - footer_lines))
+    if [[ $max_display_lines -lt 5 ]]; then
+        max_display_lines=5
+    fi
+    
+    # 渲染函数
+    render() {
+        # 清屏并回到顶部
+        echo -ne "\033[2J\033[H"
+        
+        # 显示标题
+        echo -e "\033[1;36m插件管理器 - 使用上下键移动，空格切换选中，Enter确认，ESC取消\033[0m"
+        echo -e "\033[1;33m提示：选中的插件将会被启用\033[0m"
+        echo ""
+        
+        # 计算显示范围
+        local start_line=1
+        local end_line=$total
+        
+        # 如果插件数量超过可显示行数，滚动显示
+        if [[ $total -gt $max_display_lines ]]; then
+            start_line=$((current_index - max_display_lines / 2))
+            if [[ $start_line -lt 1 ]]; then
+                start_line=1
+            fi
+            end_line=$((start_line + max_display_lines - 1))
+            if [[ $end_line -gt $total ]]; then
+                end_line=$total
+                start_line=$((end_line - max_display_lines + 1))
+                if [[ $start_line -lt 1 ]]; then
+                    start_line=1
+                fi
+            fi
+        fi
+        
+        # 显示插件列表
+        for ((i=start_line; i<=end_line; i++)); do
+            local plugin="${display_plugins[$i]}"
+            local stat="${display_stat[$i]}"
+            local is_selected=false
+            
+            # 检查是否被选中
+            for idx in "${selected[@]}"; do
+                if [[ $idx -eq $i ]]; then
+                    is_selected=true
+                    break
+                fi
+            done
+            
+            # 确定前缀符号
+            local prefix=""
+            if [[ "${is_selected}" == true ]]; then
+                prefix="●"
+            else
+                prefix="○"
+            fi
+            
+            # 确定显示样式
+            if [[ $i -eq $current_index ]]; then
+                # 当前选中行 - 蓝色高亮
+                if [[ "${stat}" == "1" ]]; then
+                    echo -e "${BLUE}▶ ${prefix} ${plugin}${NC}"
+                else
+                    echo -e "${BLUE}▶ ${prefix} ${plugin}${NC}"
+                fi
+            else
+                # 非当前选中行
+                if [[ "${stat}" == "1" ]]; then
+                    # 已启用 - 绿色
+                    echo -e "  ${GREEN}${prefix} ${plugin}${NC}"
+                else
+                    # 未启用 - 普通颜色
+                    echo "  ${prefix} ${plugin}"
+                fi
+            fi
+        done
+        
+        # 显示统计信息
+        echo ""
+        echo -e "${YELLOW}已选中: ${#selected[@]} 个插件${NC}"
+        echo -e "${YELLOW}总计: ${total} 个插件 (已启用: ${#enabled_list[@]}, 未启用: ${#disabled_list[@]})${NC}"
+    }
+    
+    # 主循环
+    while true; do
+        render
+        
+        # 读取按键
+        read -r -sk1 key
+        
+        case "$key" in
+            $'\x1b')  # ESC 开头的序列
+                read -r -sk1 -t 0.1 key2
+                if [[ "$key2" == "[" ]]; then
+                    read -r -sk1 -t 0.1 key3
+                    case "$key3" in
+                        'A')  # 上键
+                            current_index=$((current_index - 1))
+                            if [[ $current_index -lt 1 ]]; then
+                                current_index=$total
+                            fi
+                            ;;
+                        'B')  # 下键
+                            current_index=$((current_index + 1))
+                            if [[ $current_index -gt $total ]]; then
+                                current_index=1
+                            fi
+                            ;;
+                    esac
+                else
+                    # ESC 键 - 取消
+                    tput rmcup
+                    stty echo
+                    clear
+                    echo "操作已取消"
+                    return 0
+                fi
+                ;;
+            ' ')  # 空格键 - 切换选中
+                # 检查是否已经在选中列表中
+                local found=false
+                local new_selected=()
+                for idx in "${selected[@]}"; do
+                    if [[ $idx -eq $current_index ]]; then
+                        found=true
+                    else
+                        new_selected+=("$idx")
+                    fi
+                done
+                
+                if [[ "$found" == false ]]; then
+                    # 添加选中
+                    selected+=("$current_index")
+                    # 将状态改为已启用
+                    display_stat[$current_index]="1"
+                else
+                    # 移除选中
+                    selected=("${new_selected[@]}")
+                    # 将状态改为未启用
+                    display_stat[$current_index]="0"
+                fi
+                ;;
+            $'\x0a'|$'\x0d')  # Enter 键 - 确认
+                # 构建新的插件列表
+                local new_enabled=()
+                for idx in "${selected[@]}"; do
+                    new_enabled+=("${display_plugins[$idx]}")
+                done
+                
+                # 写入配置
+                write_plugins "${new_enabled[@]}"
+                
+                tput rmcup
+                stty echo
+                clear
+                echo "插件配置已更新！"
+                echo "已启用插件: ${#new_enabled[@]} 个"
+                if [[ ${#new_enabled[@]} -gt 0 ]]; then
+                    echo "插件列表: ${new_enabled[*]}"
+                fi
+                return 0
+                ;;
+        esac
+    done
+    
+    # 恢复终端设置
+    tput rmcup
+    stty echo
 }
 
 # 添加插件
@@ -249,25 +634,6 @@ remove_plugins() {
     echo "已移除插件: ${removed[*]}"
 }
 
-# 列出已安装的插件
-list_plugins() {
-    ensure_config_files
-    
-    echo "已安装的插件:"
-    if [[ -f "${CONFIG_MYZSH_DIR}/plugins" ]]; then
-        source "${CONFIG_MYZSH_DIR}/plugins" 2>/dev/null || true
-        if [[ ${#plugins[@]} -eq 0 ]]; then
-            echo "  (无)"
-        else
-            for plugin in "${plugins[@]}"; do
-                echo "  - ${plugin}"
-            done
-        fi
-    else
-        echo "  (无)"
-    fi
-}
-
 # 显示帮助信息
 show_help() {
     cat << EOF
@@ -278,12 +644,19 @@ show_help() {
     install plugin <仓库地址>   安装插件
     theme set <主题名>          设置当前主题
     theme config <路径>         设置主题配置文件路径
+    plugin                      交互式插件管理（上下选择，空格切换，Enter确认）
     plugin add <插件名>...      启用已安装的插件
     plugin remove <插件名>...   移除已启用的插件
-    plugin list                 列出已启用的插件
+    plugin list [true|on|enable] 列出插件（默认列出所有已安装的插件）
     edit <路径>                 编辑配置文件（路径相对于 ${CONFIG_DIR}/）
     edit set <编辑器命令>       设置默认编辑器
     help                        显示此帮助信息
+
+交互式插件管理:
+    上下键: 移动选择
+    空格键: 切换选中状态（选中=启用）
+    Enter键: 确认并保存
+    ESC键: 取消操作
 
 配置文件加载目录:
     ${CONFIG_MYZSH_DIR}/         (myzsh 加载配置的目录)
@@ -300,9 +673,11 @@ show_help() {
     myzsh install plugin https://github.com/user/plugin-repo.git
     myzsh theme set mytheme
     myzsh theme config /path/to/theme.config
+    myzsh plugin                     # 进入交互式插件管理
     myzsh plugin add git zsh-autosuggestions
     myzsh plugin remove git
-    myzsh plugin list
+    myzsh plugin list                # 列出所有已安装的插件（○未启用，●已启用）
+    myzsh plugin list true           # 列出已启用的插件（含统计）
     myzsh edit myzsh/plugins
     myzsh edit myzsh/theme
     myzsh edit set vim
@@ -367,29 +742,30 @@ main() {
             esac
             ;;
         plugin)
-            if [[ $# -lt 1 ]]; then
-                echo "错误: plugin 需要指定子命令"
-                echo "可用子命令: add, remove, list"
-                return 1
+            if [[ $# -eq 0 ]]; then
+                # 无参数时进入交互模式
+                interactive_plugin_manager
+            else
+                local subcmd="$1"
+                shift
+                case "${subcmd}" in
+                    add)
+                        add_plugins "$@"
+                        ;;
+                    remove)
+                        remove_plugins "$@"
+                        ;;
+                    list)
+                        list_plugins "$@"
+                        ;;
+                    *)
+                        echo "错误: 未知 plugin 子命令 '${subcmd}'"
+                        echo "可用子命令: add, remove, list"
+                        echo "直接运行 'myzsh plugin' 进入交互式模式"
+                        return 1
+                        ;;
+                esac
             fi
-            local subcmd="$1"
-            shift
-            case "${subcmd}" in
-                add)
-                    add_plugins "$@"
-                    ;;
-                remove)
-                    remove_plugins "$@"
-                    ;;
-                list)
-                    list_plugins
-                    ;;
-                *)
-                    echo "错误: 未知 plugin 子命令 '${subcmd}'"
-                    echo "可用子命令: add, remove, list"
-                    return 1
-                    ;;
-            esac
             ;;
         edit)
             if [[ $# -lt 1 ]]; then

@@ -9,8 +9,8 @@ fi
 
 # 加载主题文件
 if [[ -n "$ZSH_THEME" ]]; then
-    if [[ -f "$XDG_DATA_HOME/myzsh/themes/$ZSH_THEME/$ZSH_THEME.zsh-theme" ]]; then
-        source "$XDG_DATA_HOME/myzsh/themes/$ZSH_THEME/$ZSH_THEME.zsh-theme"
+    if [[ -f "$MYZSH_DIR/themes/$ZSH_THEME.zsh-theme" ]]; then
+        source "$MYZSH_DIR/themes/$ZSH_THEME.zsh-theme"
     else
         echo "\033[31m[错误] 主题 \x1b[34;1m$ZSH_THEME\033[0m\033[31m 不存在\033[0m"
     fi

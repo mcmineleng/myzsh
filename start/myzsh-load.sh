@@ -1,14 +1,15 @@
-#!/bin/zsh
-source "$XDG_DATA_HOME/myzsh/lib/zsh-defer.plugin.zsh"
-fpath+=($XDG_DATA_HOME/myzsh/lib $XDG_DATA_HOME/myzsh/bin)
+source "$MYZSH_DIR/config/myzsh/env"
+fpath+=($MYZSH_DIR/lib $MYZSH_DIR/bin)
 autoload -Uz myzsh
-source "$XDG_DATA_HOME/myzsh/start/autoload.sh"
-source "$XDG_DATA_HOME/myzsh/start/function.sh"
-source "$XDG_DATA_HOME/myzsh/config/myzsh/ZSH_THEME"
-source "$XDG_DATA_HOME/myzsh/config/myzsh/ZSH_THEME_CONFIG"
-source "$XDG_DATA_HOME/myzsh/start/theme.sh"
-source "$XDG_DATA_HOME/myzsh/config/myzsh/HISTFILE"
-source "$XDG_DATA_HOME/myzsh/start/history.sh"
-source "$XDG_DATA_HOME/myzsh/start/alias.sh"
-source "$XDG_DATA_HOME/myzsh/config/myzsh/plugins"
-zsh-defer source "$XDG_DATA_HOME/myzsh/start/plugins.sh"
+source "$MYZSH_DIR/config/myzsh/language"
+source "$MYZSH_DIR/config/myzsh/HISTFILE"
+source "$MYZSH_DIR/start/history.sh"
+source "$MYZSH_DIR/config/myzsh/alias"
+source "$MYZSH_DIR/lib/zsh-defer.plugin.zsh"
+source "$MYZSH_DIR/config/myzsh/autoload"
+source "$MYZSH_DIR/start/function.sh"
+source "$MYZSH_DIR/config/myzsh/ZSH_THEME"
+source "$MYZSH_DIR/config/myzsh/ZSH_THEME_CONFIG"
+zsh-defer source "$MYZSH_DIR/start/theme.sh"
+source "$MYZSH_DIR/config/myzsh/plugins"
+zsh-defer source "$MYZSH_DIR/start/plugins.sh"

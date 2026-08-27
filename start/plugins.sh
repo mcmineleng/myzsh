@@ -1,6 +1,6 @@
 #!/bin/zsh
 for plugin ($plugins) {
-    local plugin_path="$XDG_DATA_HOME/myzsh/plugins/$plugin/$plugin.plugin.zsh"
+    local plugin_path="$MYZSH_DIR/plugins/$plugin/$plugin.plugin.zsh"
     if [[ -f "$plugin_path" ]]; then
         source "$plugin_path"
     else

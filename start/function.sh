@@ -1,3 +1,3 @@
-for file in $XDG_DATA_HOME/myzsh/function/*; do
+for file in $MYZSH_DIR/function/*; do
     source "$file"
 done
