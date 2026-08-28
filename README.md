@@ -4,12 +4,12 @@
 ## 安装
 使用curl
 ```
-zsh <(curl -sSL https://raw.githubusercontent.com/mcmineleng/myzsh/main/install.sh)
+zsh <(curl -sSL https://raw.githubusercontent.com/mcmineleng/myzsh/main/install.sh) --cli
 ```
   
 使用wget
 ```
-zsh <(wget -qO- https://raw.githubusercontent.com/mcmineleng/myzsh/main/install.sh)
+zsh <(wget -qO- https://raw.githubusercontent.com/mcmineleng/myzsh/main/install.sh) --cli
 ```
 ## 用法
 ```shell
