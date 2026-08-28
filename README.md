@@ -2,15 +2,47 @@
 
 # MyZSH 使用帮助
 ## 安装
-使用curl
+#### 使用curl下载安装脚本
 ```
-zsh <(curl -sSL https://raw.githubusercontent.com/mcmineleng/myzsh/main/install.sh) --cli
+curl -O https://sh.mcleng.cn/myzshinstall
 ```
   
-使用wget
+### 使用wget下载安装脚本
 ```
-zsh <(wget -qO- https://raw.githubusercontent.com/mcmineleng/myzsh/main/install.sh) --cli
+wget https://sh.mcleng.cn/myzshinstall
 ```
+### 交互式安装:
+```
+bash myinstall --cli
+```
+### 静默安装:
+#### 环境变量：
+```
+#Oh-My-Zsh仓库地址，可以用于配置加速下载
+OMZ_REPO=https://github.com/ohmyzsh/ohmyzsh
+
+#本项目仓库地址，可以用于配置加速下载
+MYZSH_REPO=https://github.com/mcmineleng/myzsh
+
+#安装目录
+MYZSH_DIR=$HOME/.myzsh
+
+#是否安装Oh-My-Zsh自带主题
+OMZ_THEMES_INSTALL=true
+
+#是否安装Oh-My-Zsh自带插件
+OMZ_PLUGINS_INSTALL=true
+```
+#### 安装
+```
+bash myzshinstall
+```
+或者
+```
+bash myzshinstall > /dev/null
+```
+把输出给丢弃真静默安装
+
 ## 用法
 ```shell
 myzsh <命令> [参数]
