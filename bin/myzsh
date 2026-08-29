@@ -82,6 +82,10 @@ class MyZshManager:
         if not self.editor_file.exists():
             editor = os.environ.get('EDITOR', 'vi')
             self.editor_file.write_text(f"EDITOR={editor}\n")
+        
+        # 确保主题文件存在（使用新格式）
+        if not self.theme_file.exists():
+            self.theme_file.write_text("ZSH_THEME=${ZSH_THEME:-robbyrussell}\n")
     
     def _get_editor(self) -> str:
         """获取编辑器命令"""
@@ -106,26 +110,72 @@ class MyZshManager:
         self.editor_file.write_text(f"EDITOR={editor_cmd}\n")
         print(f"编辑器已设置为: {editor_cmd}")
     
+    def _get_current_theme(self) -> Optional[str]:
+        """获取当前设置的主题名称"""
+        if self.theme_file.exists():
+            try:
+                content = self.theme_file.read_text()
+                for line in content.splitlines():
+                    if line.startswith('ZSH_THEME='):
+                        # 提取 ZSH_THEME= 后面的内容
+                        value = line.split('=', 1)[1].strip()
+                        # 如果是 ${ZSH_THEME:-default} 格式，提取默认值
+                        if value.startswith('${ZSH_THEME:-') and value.endswith('}'):
+                            default_value = value[14:-1]  # 去掉 ${ZSH_THEME:- 和 }
+                            return default_value
+                        # 如果是直接赋值
+                        elif not value.startswith('${'):
+                            return value
+                        # 如果是 ${ZSH_THEME} 格式，返回 None
+                        return None
+                return None
+            except Exception:
+                return None
+        return None
+    
     def _set_theme(self, theme_name: str) -> None:
-        """设置主题"""
+        """设置主题（使用新格式）"""
         if not theme_name:
             print(Colors.red("错误: 请指定主题名称"))
             print("用法: myzsh theme set <主题名>")
             return
         
         self._ensure_dirs()
-        self.theme_file.write_text(f"ZSH_THEME={theme_name}\n")
+        # 使用新格式：ZSH_THEME=${ZSH_THEME:-主题名}
+        self.theme_file.write_text(f"ZSH_THEME=${{ZSH_THEME:-{theme_name}}}\n")
         print(f"主题已设置为: {theme_name}")
     
+    def _get_theme_config(self) -> Optional[str]:
+        """获取主题配置文件路径"""
+        if self.theme_config_file.exists():
+            try:
+                content = self.theme_config_file.read_text()
+                for line in content.splitlines():
+                    if line.startswith('ZSH_THEME_CONFIG='):
+                        value = line.split('=', 1)[1].strip()
+                        # 如果是 ${ZSH_THEME_CONFIG:-default} 格式，提取默认值
+                        if value.startswith('${ZSH_THEME_CONFIG:-') and value.endswith('}'):
+                            default_value = value[21:-1]  # 去掉 ${ZSH_THEME_CONFIG:- 和 }
+                            return default_value
+                        # 如果是直接赋值
+                        elif not value.startswith('${'):
+                            return value
+                        return None
+                return None
+            except Exception:
+                return None
+        return None
+    
     def _set_theme_config(self, config_path: str) -> None:
-        """设置主题配置文件路径"""
+        """设置主题配置文件路径（使用新格式）"""
         if not config_path:
             print(Colors.red("错误: 请指定配置文件路径"))
             print("用法: myzsh theme config <路径>")
             return
         
         self._ensure_dirs()
-        self.theme_config_file.write_text(f"ZSH_THEME_CONFIG={config_path}\n")
+        # 使用新格式：ZSH_THEME_CONFIG=${ZSH_THEME_CONFIG:-路径}
+        self.theme_config_file.write_text(f"ZSH_THEME_CONFIG=${{ZSH_THEME_CONFIG:-{config_path}}}\n")
         print(f"主题配置文件路径已设置为: {config_path}")
     
     def _get_plugins(self) -> List[str]:
@@ -161,16 +211,7 @@ class MyZshManager:
             
             if theme_dirs:
                 # 获取当前主题
-                current_theme = None
-                if self.theme_file.exists():
-                    try:
-                        content = self.theme_file.read_text()
-                        for line in content.splitlines():
-                            if line.startswith('ZSH_THEME='):
-                                current_theme = line.split('=', 1)[1].strip()
-                                break
-                    except:
-                        pass
+                current_theme = self._get_current_theme()
                 
                 for theme_dir in theme_dirs:
                     theme_name = theme_dir.name
