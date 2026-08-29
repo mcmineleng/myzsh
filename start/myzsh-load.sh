@@ -2,7 +2,7 @@ source "$MYZSH_DIR/config/myzsh/env"
 export PATH=$HOME/.myzsh/bin:$PATH
 fpath=($MYZSH_DIR/lib $fpath)
 source "$MYZSH_DIR/config/myzsh/autoload"
-source "$MYZSH_DIR/start/function.sh"
+source "$MYZSH_DIR/start/lib.sh"
 source "$MYZSH_DIR/config/myzsh/language"
 source "$MYZSH_DIR/config/myzsh/HISTFILE"
 source "$MYZSH_DIR/start/history.sh"

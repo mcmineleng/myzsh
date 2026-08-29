@@ -66,7 +66,7 @@ class MyZshManager:
         
         # 核心目录（用于更新）
         self.bin_dir = Path(self.myzsh_dir) / 'bin'
-        self.functions_dir = Path(self.myzsh_dir) / 'functions'  # 修正为 functions
+        self.lib_dir = Path(self.myzsh_dir) / 'lib'  # 修正为 lib
         self.start_dir = Path(self.myzsh_dir) / 'start'
         self.lib_dir = Path(self.myzsh_dir) / 'lib'
         
@@ -551,7 +551,7 @@ class MyZshManager:
             print(Colors.green("仓库克隆成功"))
             
             # 需要更新的目录列表
-            dirs_to_update = ['bin', 'functions', 'start', 'lib']
+            dirs_to_update = ['bin', 'lib', 'start', 'lib']
             
             print("正在更新目录...")
             updated_dirs = []
@@ -570,9 +570,9 @@ class MyZshManager:
                     print(f"  {Colors.yellow('⚠')} {dir_name}/ 不存在于仓库中，跳过")
                     skipped_dirs.append(dir_name)
             
-            # 给 bin 和 functions 目录添加可执行权限
+            # 给 bin 和 lib 目录添加可执行权限
             print("\n正在设置可执行权限...")
-            for dir_name in ['bin', 'functions']:
+            for dir_name in ['bin', 'lib']:
                 dir_path = Path(self.myzsh_dir) / dir_name
                 self._chmod_executable(dir_path)
             
@@ -613,7 +613,7 @@ class MyZshManager:
     plugin list [true|on|enable] 列出插件（默认列出所有已安装的插件）
     edit <路径>                 编辑配置文件（路径相对于 {self.config_dir}/）
     edit set <编辑器命令>       设置默认编辑器
-    update                      更新 myzsh 核心文件（bin, functions, start, lib）
+    update                      更新 myzsh 核心文件（bin, lib, start, lib）
     help                        显示此帮助信息
 
 注意：安装主题和插件请使用 myzshpack 命令

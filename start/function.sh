@@ -1,1 +1,0 @@
-fpath=($MYZSH_DIR/functions $fpath)
