@@ -77,7 +77,7 @@ class MyZshPackManager:
                 {
                         "name": "myzsh",
                         "index": "https://raw.github.com/mcmineleng/myzsh-package/main/myzsh.json"
-                    }
+                    },
                     {
                         "name": "oh-my-zsh",
                         "index": "https://raw.github.com/mcmineleng/myzsh-package/main/oh-my-zsh.json"
