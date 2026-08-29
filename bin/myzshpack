@@ -74,13 +74,17 @@ class MyZshPackManager:
         if not self.packages_repo_file.exists():
             default_repo = {
                 "repo": [
-                    {
-                        "name": "awesome-zsh-plugins",
-                        "index": "https://raw.github.com/mcmineleng/myzsh-package/main/awesome-zsh-plugins.json"
-                    },
+                {
+                        "name": "myzsh",
+                        "index": "https://raw.github.com/mcmineleng/myzsh-package/main/myzsh.json"
+                    }
                     {
                         "name": "oh-my-zsh",
                         "index": "https://raw.github.com/mcmineleng/myzsh-package/main/oh-my-zsh.json"
+                    },
+                    {
+                        "name": "awesome-zsh-plugins",
+                        "index": "https://raw.github.com/mcmineleng/myzsh-package/main/awesome-zsh-plugins.json"
                     }
                 ]
             }
