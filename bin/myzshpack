@@ -367,7 +367,7 @@ class MyZshPackManager:
             print(Colors.red(f"解压失败: {e}"))
             return False
     
-    def _install_from_archive(self, url: str, target_dir: Path, archive_type: str, item_id: str) -> None:
+    def _install_from_archive(self, url: str, target_dir: Path, archive_type: str, item_id: str, item_type: str = 'plugin') -> None:
         """从压缩包安装"""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -398,6 +398,7 @@ class MyZshPackManager:
                 print(Colors.red("解压后没有内容"))
                 return
             
+            # 主题和插件使用相同的逻辑：创建以 item_id 命名的文件夹
             target_path = target_dir / item_id
             if target_path.exists():
                 shutil.rmtree(target_path)
@@ -411,15 +412,33 @@ class MyZshPackManager:
             
             print(Colors.green(f"安装成功!"))
     
-    def _install_file(self, url: str, target_dir: Path, item_id: str) -> None:
-        """安装单文件（从 URL 下载单个文件）"""
+    def _install_file(self, url: str, target_dir: Path, item_id: str, item_type: str = 'plugin') -> None:
+        """安装单文件"""
         # 根据 URL 获取文件名
         filename = Path(url).name
         if not filename:
             # 如果 URL 没有文件名，使用 item_id
             filename = item_id
         
-        # 创建以 item_id 命名的文件夹
+        # 主题：直接放在 themes 目录，不创建子文件夹
+        if item_type == 'theme':
+            target_path = target_dir / filename
+            # 如果文件已存在，询问是否覆盖
+            if target_path.exists():
+                print(Colors.yellow(f"文件已存在: {target_path}"))
+                response = input("是否覆盖? (y/N): ").strip().lower()
+                if response not in ('y', 'yes'):
+                    print("跳过安装")
+                    return
+            
+            if self._download_file(url, target_path):
+                print(Colors.green(f"主题文件 {item_id} 安装成功!"))
+                print(f"  文件: {target_path}")
+            else:
+                print(Colors.red(f"主题文件 {item_id} 安装失败"))
+            return
+        
+        # 插件：创建以 item_id 命名的文件夹
         target_path = target_dir / item_id
         if target_path.exists():
             print(Colors.yellow(f"目录已存在: {target_path}"))
@@ -434,12 +453,12 @@ class MyZshPackManager:
         # 下载文件到目标文件夹
         file_path = target_path / filename
         if self._download_file(url, file_path):
-            print(Colors.green(f"单文件 {item_id} 安装成功!"))
+            print(Colors.green(f"插件 {item_id} 安装成功!"))
             print(f"  文件: {file_path}")
         else:
             # 如果下载失败，删除空文件夹
             shutil.rmtree(target_path)
-            print(Colors.red(f"单文件 {item_id} 安装失败"))
+            print(Colors.red(f"插件 {item_id} 安装失败"))
     
     def _install_manual(self, item_type: str, item_name: str, url: str, archive_type: str = 'git') -> None:
         """手动安装主题或插件"""
@@ -455,9 +474,9 @@ class MyZshPackManager:
         if archive_type == 'git':
             self._clone_repo(url, target_dir)
         elif archive_type == 'file':
-            self._install_file(url, target_dir, item_name)
+            self._install_file(url, target_dir, item_name, item_type)
         else:
-            self._install_from_archive(url, target_dir, archive_type, item_name)
+            self._install_from_archive(url, target_dir, archive_type, item_name, item_type)
     
     def _install_from_repo(self, item_id: str, item_type: str, item_data: Dict) -> None:
         """从仓库安装主题或插件"""
@@ -475,6 +494,23 @@ class MyZshPackManager:
             target_dir = self.plugins_dir
             item_label = "插件"
         
+        # 主题的 file 类型特殊处理：直接放在 themes 目录
+        if item_type == 'theme' and archive_type == 'file':
+            # 检查文件是否存在
+            filename = Path(url).name
+            if not filename:
+                filename = item_id
+            target_path = target_dir / filename
+            if target_path.exists():
+                print(Colors.yellow(f"文件已存在: {target_path}"))
+                response = input("是否覆盖? (y/N): ").strip().lower()
+                if response not in ('y', 'yes'):
+                    print("跳过安装")
+                    return
+            self._install_file(url, target_dir, item_id, item_type)
+            return
+        
+        # 其他类型：创建子文件夹
         target_path = target_dir / item_id
         
         if target_path.exists():
@@ -494,90 +530,149 @@ class MyZshPackManager:
             else:
                 print(Colors.red(f"{item_label} {item_id} 安装失败"))
         elif archive_type == 'file':
-            self._install_file(url, target_dir, item_id)
+            # 这里实际上不会执行到，因为上面已经处理了 theme + file 的情况
+            # 但为了完整性保留
+            self._install_file(url, target_dir, item_id, item_type)
         else:
-            self._install_from_archive(url, target_dir, archive_type, item_id)
+            self._install_from_archive(url, target_dir, archive_type, item_id, item_type)
     
-    def install(self, name: str, target_type: Optional[str] = None) -> None:
-        """安装主题或插件"""
-        if not name:
+    def install(self, items: List[str], target_type: Optional[str] = None) -> None:
+        """批量安装主题或插件"""
+        if not items:
             print(Colors.red("错误: 请指定要安装的名称或URL"))
             return
         
-        # 检查是否是URL（手动安装）
-        if name.startswith(('http://', 'https://', 'git@')):
-            if target_type not in ['theme', 'plugin']:
-                print(Colors.red("错误: 手动安装需要指定类型"))
-                print(f"用法: {os.path.basename(sys.argv[0])} install theme <URL> [类型]")
-                print(f"      {os.path.basename(sys.argv[0])} install plugin <URL> [类型]")
-                return
+        # 如果是 install theme/plugin 且只传了一个参数，但那个参数是类型名
+        if target_type and len(items) == 1 and items[0] in ['theme', 'plugin']:
+            print(Colors.red(f"错误: 请指定要安装的{items[0]}名称或URL"))
+            return
+        
+        # 遍历所有要安装的项目
+        success_count = 0
+        fail_count = 0
+        
+        for item in items:
+            print(f"\n{Colors.cyan('=' * 50)}")
+            print(f"处理: {item}")
+            print(Colors.cyan('=' * 50))
             
-            if len(sys.argv) > 3:
-                archive_type = sys.argv[3]
-            else:
+            # 检查是否是URL（手动安装）
+            if item.startswith(('http://', 'https://', 'git@')):
+                if not target_type:
+                    print(Colors.red("错误: 手动安装需要指定类型"))
+                    print(f"用法: {os.path.basename(sys.argv[0])} install theme <URL> [类型]")
+                    print(f"      {os.path.basename(sys.argv[0])} install plugin <URL> [类型]")
+                    fail_count += 1
+                    continue
+                
+                # 对于手动安装，我们需要从参数中获取 archive_type
+                # 但由于我们在这里无法知道，我们默认使用 git
+                # 如果是 file 类型，需要在 URL 后面加 file 参数
+                # 这里我们通过一个简单的启发式判断
                 archive_type = 'git'
-            
-            url_path = Path(name)
-            if url_path.stem:
-                item_name = url_path.stem
-            else:
-                item_name = name.split('/')[-1].split('.')[0]
-            
-            self._install_manual(target_type, item_name, name, archive_type)
-            return
-        
-        # 从仓库安装
-        index_data = self._load_index()
-        themes = index_data.get('themes', [])
-        plugins = index_data.get('plugins', [])
-        
-        matched_themes = [t for t in themes if t.get('id') == name]
-        matched_plugins = [p for p in plugins if p.get('id') == name]
-        
-        if target_type:
-            if target_type == 'theme':
-                if matched_themes:
-                    self._install_from_repo(name, 'theme', matched_themes[0])
+                if item.endswith(('.zip', '.tar.gz', '.tgz', '.tar')):
+                    if item.endswith('.zip'):
+                        archive_type = 'zip'
+                    elif item.endswith('.tar.gz') or item.endswith('.tgz'):
+                        archive_type = 'tar.gz'
+                    elif item.endswith('.tar'):
+                        archive_type = 'tar'
+                elif item.endswith(('.zsh', '.zsh-theme', '.sh')):
+                    archive_type = 'file'
+                
+                url_path = Path(item)
+                if url_path.stem:
+                    item_name = url_path.stem
                 else:
-                    print(Colors.red(f"未找到主题: {name}"))
-                return
-            elif target_type == 'plugin':
-                if matched_plugins:
-                    self._install_from_repo(name, 'plugin', matched_plugins[0])
+                    item_name = item.split('/')[-1].split('.')[0]
+                
+                # 如果是 file 类型的主题，使用 file 类型安装
+                if target_type == 'theme' and archive_type == 'file':
+                    self._install_file(item, self.themes_dir, item_name, target_type)
+                    success_count += 1
                 else:
-                    print(Colors.red(f"未找到插件: {name}"))
-                return
-            else:
-                print(Colors.red(f"错误: 未知类型 '{target_type}'，请使用 'theme' 或 'plugin'"))
-                return
+                    self._install_manual(target_type, item_name, item, archive_type)
+                    # 简单判断是否成功
+                    if target_type == 'theme':
+                        if (self.themes_dir / item_name).exists():
+                            success_count += 1
+                        else:
+                            fail_count += 1
+                    else:
+                        if (self.plugins_dir / item_name).exists():
+                            success_count += 1
+                        else:
+                            fail_count += 1
+                continue
+            
+            # 从仓库安装
+            index_data = self._load_index()
+            themes = index_data.get('themes', [])
+            plugins = index_data.get('plugins', [])
+            
+            matched_themes = [t for t in themes if t.get('id') == item]
+            matched_plugins = [p for p in plugins if p.get('id') == item]
+            
+            if target_type:
+                if target_type == 'theme':
+                    if matched_themes:
+                        self._install_from_repo(item, 'theme', matched_themes[0])
+                        success_count += 1
+                    else:
+                        print(Colors.red(f"未找到主题: {item}"))
+                        fail_count += 1
+                    continue
+                elif target_type == 'plugin':
+                    if matched_plugins:
+                        self._install_from_repo(item, 'plugin', matched_plugins[0])
+                        success_count += 1
+                    else:
+                        print(Colors.red(f"未找到插件: {item}"))
+                        fail_count += 1
+                    continue
+                else:
+                    print(Colors.red(f"错误: 未知类型 '{target_type}'，请使用 'theme' 或 'plugin'"))
+                    fail_count += 1
+                    continue
+            
+            if not matched_themes and not matched_plugins:
+                print(Colors.red(f"未找到: {item}"))
+                print(f"提示: 先运行 '{os.path.basename(sys.argv[0])} update' 更新索引")
+                fail_count += 1
+                continue
+            
+            if matched_themes and not matched_plugins:
+                print(f"找到主题: {item}")
+                self._install_from_repo(item, 'theme', matched_themes[0])
+                success_count += 1
+                continue
+            
+            if matched_plugins and not matched_themes:
+                print(f"找到插件: {item}")
+                self._install_from_repo(item, 'plugin', matched_plugins[0])
+                success_count += 1
+                continue
+            
+            if matched_themes and matched_plugins:
+                print(f"找到主题和插件都名为 '{item}':")
+                print("  1. 安装主题")
+                print("  2. 安装插件")
+                choice = input("请选择 (1/2): ").strip()
+                if choice == '1':
+                    self._install_from_repo(item, 'theme', matched_themes[0])
+                    success_count += 1
+                elif choice == '2':
+                    self._install_from_repo(item, 'plugin', matched_plugins[0])
+                    success_count += 1
+                else:
+                    print(Colors.yellow("取消安装"))
+                    fail_count += 1
+                continue
         
-        if not matched_themes and not matched_plugins:
-            print(Colors.red(f"未找到: {name}"))
-            print(f"提示: 先运行 '{os.path.basename(sys.argv[0])} update' 更新索引")
-            return
-        
-        if matched_themes and not matched_plugins:
-            print(f"找到主题: {name}")
-            self._install_from_repo(name, 'theme', matched_themes[0])
-            return
-        
-        if matched_plugins and not matched_themes:
-            print(f"找到插件: {name}")
-            self._install_from_repo(name, 'plugin', matched_plugins[0])
-            return
-        
-        if matched_themes and matched_plugins:
-            print(f"找到主题和插件都名为 '{name}':")
-            print("  1. 安装主题")
-            print("  2. 安装插件")
-            choice = input("请选择 (1/2): ").strip()
-            if choice == '1':
-                self._install_from_repo(name, 'theme', matched_themes[0])
-            elif choice == '2':
-                self._install_from_repo(name, 'plugin', matched_plugins[0])
-            else:
-                print(Colors.yellow("取消安装"))
-            return
+        # 显示汇总信息
+        print(f"\n{Colors.cyan('=' * 50)}")
+        print(f"安装完成: {Colors.green(f'成功 {success_count}')} 个, {Colors.red(f'失败 {fail_count}')} 个")
+        print(Colors.cyan('=' * 50))
     
     def remove(self, name: str, target_type: Optional[str] = None) -> None:
         """移除主题或插件"""
@@ -597,24 +692,68 @@ class MyZshPackManager:
                 print(Colors.red(f"错误: 未知类型 '{target_type}'，请使用 'theme' 或 'plugin'"))
                 return
             
-            target_path = target_dir / name
-            if not target_path.exists():
-                print(Colors.yellow(f"{item_label} {name} 未安装"))
-                return
+            # 对于主题，检查文件或目录
+            if target_type == 'theme':
+                # 检查是否是目录
+                target_path = target_dir / name
+                if not target_path.exists():
+                    # 检查是否是文件
+                    target_path = target_dir / name
+                    # 尝试添加常见扩展名
+                    extensions = ['.zsh-theme', '.zsh', '.sh']
+                    found = False
+                    for ext in extensions:
+                        file_path = target_dir / f"{name}{ext}"
+                        if file_path.exists():
+                            target_path = file_path
+                            found = True
+                            break
+                    if not found:
+                        print(Colors.yellow(f"{item_label} {name} 未安装"))
+                        return
+                else:
+                    # 检查目录下是否有主题文件
+                    has_theme = False
+                    for ext in ['.zsh-theme', '.zsh', '.sh']:
+                        if list(target_path.glob(f"*{ext}")):
+                            has_theme = True
+                            break
+                    if not has_theme and not target_path.is_file():
+                        print(Colors.yellow(f"{item_label} {name} 未安装或不是有效的主题"))
+                        return
+            else:
+                target_path = target_dir / name
+                if not target_path.exists():
+                    print(Colors.yellow(f"{item_label} {name} 未安装"))
+                    return
             
             print(f"找到{item_label}: {name}")
             response = input(f"是否移除{item_label} {name}? (y/N): ").strip().lower()
             if response in ('y', 'yes'):
-                shutil.rmtree(target_path)
+                if target_path.is_dir():
+                    shutil.rmtree(target_path)
+                else:
+                    target_path.unlink()
                 print(Colors.green(f"{item_label} {name} 已移除"))
             else:
                 print("取消移除")
             return
         
         # 没有指定类型，检查是否存在
+        # 检查主题
         theme_path = self.themes_dir / name
-        plugin_path = self.plugins_dir / name
         theme_exists = theme_path.exists()
+        if not theme_exists:
+            # 检查是否是文件
+            extensions = ['.zsh-theme', '.zsh', '.sh']
+            for ext in extensions:
+                file_path = self.themes_dir / f"{name}{ext}"
+                if file_path.exists():
+                    theme_path = file_path
+                    theme_exists = True
+                    break
+        
+        plugin_path = self.plugins_dir / name
         plugin_exists = plugin_path.exists()
         
         if not theme_exists and not plugin_exists:
@@ -628,13 +767,19 @@ class MyZshPackManager:
             print("  3. 全部移除")
             choice = input("请选择 (1/2/3): ").strip()
             if choice == '1':
-                shutil.rmtree(theme_path)
+                if theme_path.is_dir():
+                    shutil.rmtree(theme_path)
+                else:
+                    theme_path.unlink()
                 print(Colors.green(f"主题 {name} 已移除"))
             elif choice == '2':
                 shutil.rmtree(plugin_path)
                 print(Colors.green(f"插件 {name} 已移除"))
             elif choice == '3':
-                shutil.rmtree(theme_path)
+                if theme_path.is_dir():
+                    shutil.rmtree(theme_path)
+                else:
+                    theme_path.unlink()
                 shutil.rmtree(plugin_path)
                 print(Colors.green(f"主题和插件 {name} 已全部移除"))
             else:
@@ -645,7 +790,10 @@ class MyZshPackManager:
             print(f"找到主题: {name}")
             response = input(f"是否移除主题 {name}? (y/N): ").strip().lower()
             if response in ('y', 'yes'):
-                shutil.rmtree(theme_path)
+                if theme_path.is_dir():
+                    shutil.rmtree(theme_path)
+                else:
+                    theme_path.unlink()
                 print(Colors.green(f"主题 {name} 已移除"))
             else:
                 print("取消移除")
@@ -686,9 +834,12 @@ class MyZshPackManager:
                 theme_id = theme.get('id', '')
                 theme_url = theme.get('url', '')
                 theme_type = theme.get('type', 'git')
-                print(f"  {Colors.green('●')} {theme_id} ({theme_type})")
+                display_type = 'file' if theme_type == 'file' else theme_type
+                print(f"  {Colors.green('●')} {theme_id} ({display_type})")
                 if theme_url:
                     print(f"    URL: {theme_url}")
+                if 'description' in theme:
+                    print(f"    {theme['description']}")
         
         if matched_plugins:
             print("\n插件:")
@@ -696,9 +847,12 @@ class MyZshPackManager:
                 plugin_id = plugin.get('id', '')
                 plugin_url = plugin.get('url', '')
                 plugin_type = plugin.get('type', 'git')
-                print(f"  {Colors.green('●')} {plugin_id} ({plugin_type})")
+                display_type = 'file' if plugin_type == 'file' else plugin_type
+                print(f"  {Colors.green('●')} {plugin_id} ({display_type})")
                 if plugin_url:
                     print(f"    URL: {plugin_url}")
+                if 'description' in plugin:
+                    print(f"    {plugin['description']}")
         
         print(f"\n总计: {len(matched_themes)} 个主题, {len(matched_plugins)} 个插件")
     
@@ -737,10 +891,8 @@ class MyZshPackManager:
             for theme in themes_to_show:
                 theme_id = theme.get('id', '')
                 theme_type = theme.get('type', 'git')
-                # 如果是 file 类型，显示 file 而不是 git
                 display_type = 'file' if theme_type == 'file' else theme_type
                 print(f"  {Colors.green('●')} {theme_id} ({display_type})")
-                # 如果有描述字段，可以显示
                 if 'description' in theme:
                     print(f"    {theme['description']}")
         
@@ -765,13 +917,30 @@ class MyZshPackManager:
         """列出已安装的主题和插件"""
         print(Colors.cyan("已安装的包:"))
         
-        # 列出主题
+        # 列出主题（包括文件和目录）
         if self.themes_dir.exists():
-            themes = [d for d in self.themes_dir.iterdir() if d.is_dir()]
+            themes = []
+            # 检查目录
+            for item in self.themes_dir.iterdir():
+                if item.is_dir():
+                    # 检查是否是主题目录（包含 .zsh-theme 文件）
+                    has_theme = False
+                    for ext in ['.zsh-theme', '.zsh', '.sh']:
+                        if list(item.glob(f"*{ext}")):
+                            has_theme = True
+                            break
+                    if has_theme:
+                        themes.append(item)
+                elif item.is_file() and item.suffix in ['.zsh-theme', '.zsh', '.sh']:
+                    themes.append(item)
+            
             if themes:
                 print(f"\n{Colors.yellow('主题:')}")
                 for theme in themes:
-                    print(f"  {Colors.green('●')} {theme.name}")
+                    if theme.is_dir():
+                        print(f"  {Colors.green('●')} {theme.name}/")
+                    else:
+                        print(f"  {Colors.green('●')} {theme.name}")
             else:
                 print(f"\n{Colors.yellow('主题:')} (无)")
         else:
@@ -797,13 +966,14 @@ class MyZshPackManager:
 
 命令:
     update              更新包索引（从所有配置的仓库获取）
-    install <名称>      从仓库安装主题或插件
+    install <名称>...   从仓库安装一个或多个主题或插件
                           - 如果只有一个匹配，直接安装
                           - 如果主题和插件都有同名，会询问
-    install theme <名称> 从仓库安装指定的主题
-    install plugin <名称> 从仓库安装指定的插件
-    install theme <URL> [类型]  手动安装主题（支持git/zip/tar.gz/file等）
-    install plugin <URL> [类型]  手动安装插件（支持git/zip/tar.gz/file等）
+                          - 支持同时安装多个，用空格分隔
+    install theme <名称>... 从仓库安装一个或多个指定的主题
+    install plugin <名称>... 从仓库安装一个或多个指定的插件
+    install theme <URL>... [类型]  手动安装一个或多个主题
+    install plugin <URL>... [类型]  手动安装一个或多个插件
     remove <名称>       移除主题或插件
                           - 如果只有一个匹配，直接移除
                           - 如果主题和插件都有同名，会询问
@@ -820,7 +990,7 @@ class MyZshPackManager:
     git       - Git 仓库（默认）
     zip       - ZIP 压缩包
     tar.gz    - tar.gz 压缩包
-    file      - 单文件（下载到以名称命名的文件夹中）
+    file      - 单文件（主题直接放在 themes 目录，插件放在子文件夹中）
 
 配置文件:
     {self.packages_repo_file}  - 包仓库配置
@@ -850,7 +1020,7 @@ env 文件格式 (INI):
     REPO_BASE=https://gitee.com
 
 示例:
-    # 在线仓库安装
+    # 在线仓库安装（单个）
     {program_name} update
     {program_name} list
     {program_name} list theme
@@ -858,10 +1028,19 @@ env 文件格式 (INI):
     {program_name} search git
     {program_name} install powerlevel10k
     
+    # 在线仓库批量安装
+    {program_name} install powerlevel10k zsh-autosuggestions zsh-syntax-highlighting
+    {program_name} install theme powerlevel10k spaceship  # 安装多个主题
+    {program_name} install plugin git zsh-autosuggestions  # 安装多个插件
+    
     # 手动安装
     {program_name} install theme https://github.com/romkatv/powerlevel10k.git
     {program_name} install plugin https://github.com/zsh-users/zsh-autosuggestions.git
     {program_name} install plugin https://example.com/plugin.zsh file
+    
+    # 手动批量安装
+    {program_name} install theme https://github.com/romkatv/powerlevel10k.git https://github.com/denysdovhan/spaceship-prompt.git
+    {program_name} install plugin https://github.com/zsh-users/zsh-autosuggestions.git https://github.com/zsh-users/zsh-syntax-highlighting.git
     
     # 移除
     {program_name} remove powerlevel10k    # 如果有同名主题和插件会询问
@@ -870,6 +1049,13 @@ env 文件格式 (INI):
     
     # 列出已安装的
     {program_name} list installed
+
+主题和插件的 file 类型区别:
+    主题 (file): 直接下载到 ~/.myzsh/themes/ 目录
+                例如: ~/.myzsh/themes/my-theme.zsh-theme
+    
+    插件 (file): 下载到 ~/.myzsh/plugins/<id>/ 目录
+                例如: ~/.myzsh/plugins/my-plugin/plugin.zsh
 
 index.json 中的 file 类型示例:
     {{
@@ -906,18 +1092,21 @@ index.json 中的 file 类型示例:
         elif cmd == 'install':
             if len(args) < 1:
                 print(Colors.red("错误: 请指定要安装的名称或URL"))
-                print(f"用法: {os.path.basename(sys.argv[0])} install <名称>")
-                print(f"      {os.path.basename(sys.argv[0])} install theme <名称|URL> [类型]")
-                print(f"      {os.path.basename(sys.argv[0])} install plugin <名称|URL> [类型]")
+                print(f"用法: {os.path.basename(sys.argv[0])} install <名称1> [名称2] ...")
+                print(f"      {os.path.basename(sys.argv[0])} install theme <名称|URL>... [类型]")
+                print(f"      {os.path.basename(sys.argv[0])} install plugin <名称|URL>... [类型]")
                 return 1
             
             if args[0] in ['theme', 'plugin']:
                 if len(args) < 2:
                     print(Colors.red(f"错误: 请指定要安装的{args[0]}名称或URL"))
                     return 1
-                self.install(args[1], args[0])
+                # 剩余参数都是要安装的项目
+                items_to_install = args[1:]
+                self.install(items_to_install, args[0])
             else:
-                self.install(args[0], None)
+                # 所有参数都是要安装的项目
+                self.install(args, None)
         
         elif cmd == 'remove':
             if len(args) < 1:
