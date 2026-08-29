@@ -76,7 +76,11 @@ class MyZshPackManager:
                 "repo": [
                     {
                         "name": "awesome-zsh-plugins",
-                        "index": "https://raw.github.com/mcmineleng/myzsh-package/main/index.json"
+                        "index": "https://raw.github.com/mcmineleng/myzsh-package/main/awesome-zsh-plugins.json"
+                    },
+                    {
+                        "name": "oh-my-zsh",
+                        "index": "https://raw.github.com/mcmineleng/myzsh-package/main/oh-my-zsh.json"
                     }
                 ]
             }
