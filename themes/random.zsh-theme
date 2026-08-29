@@ -1,47 +1,45 @@
-# Deprecate ZSH_THEME_RANDOM_BLACKLIST
-if [[ -n "$ZSH_THEME_RANDOM_BLACKLIST" ]]; then
-  echo '[oh-my-zsh] ZSH_THEME_RANDOM_BLACKLIST is deprecated. Use `ZSH_THEME_RANDOM_IGNORED` instead.'
-  ZSH_THEME_RANDOM_IGNORED=($ZSH_THEME_RANDOM_BLACKLIST)
-  unset ZSH_THEME_RANDOM_BLACKLIST
+randombuild() {
+    THEMES_DIR="$MYZSH_DIR/themes"
+    OUTPUT_FILE="$MYZSH_DIR/config/themes/random/themes_list"
+    
+    [ ! -d "$THEMES_DIR" ] && return 1
+    
+    mkdir -p "$(dirname "$OUTPUT_FILE")" 2>/dev/null || return 1
+    rm -f "$OUTPUT_FILE" 2>/dev/null
+    
+    cd "$THEMES_DIR" 2>/dev/null || return 1
+    
+    find . -maxdepth 1 -type f -name "*.zsh-theme" 2>/dev/null | \
+        sed -e 's/^\.\///' -e 's/\.zsh-theme$//' | \
+        sort -u > "$OUTPUT_FILE" 2>/dev/null || return 1
+    
+    [ -s "$OUTPUT_FILE" ] || return 1
+    return 0
+}
+
+if [ ! -f "$MYZSH_DIR/config/themes/random/themes_list" ]; then
+    randombuild || {
+        ZSH_THEME="robbyrussell"
+        source "${MYZSH_DIR}/themes/${ZSH_THEME}.zsh-theme" 2>/dev/null
+        return
+    }
 fi
 
-# Make themes a unique array
-typeset -Ua themes
-
-if [[ "${(t)ZSH_THEME_RANDOM_CANDIDATES}" = array && ${#ZSH_THEME_RANDOM_CANDIDATES[@]} -gt 0 ]]; then
-  # Use ZSH_THEME_RANDOM_CANDIDATES if properly defined
-  themes=(${(@)ZSH_THEME_RANDOM_CANDIDATES:#random})
-else
-  # Look for themes in $ZSH_CUSTOM and $ZSH and add only the theme name
-  themes=(
-    "$ZSH_CUSTOM"/*.zsh-theme(N:t:r)
-    "$ZSH_CUSTOM"/themes/*.zsh-theme(N:t:r)
-    "$ZSH"/themes/*.zsh-theme(N:t:r)
-  )
-  # Remove ignored themes from the list
-  for theme in random ${ZSH_THEME_RANDOM_IGNORED[@]}; do
-    themes=("${(@)themes:#$theme}")
-  done
+THEMES_LIST="$MYZSH_DIR/config/themes/random/themes_list"
+if [ -f "$THEMES_LIST" ] && [ -s "$THEMES_LIST" ]; then
+    LINE_NUMBER=$(wc -l < "$THEMES_LIST" 2>/dev/null)
+    if [ "$LINE_NUMBER" -gt 0 ]; then
+        THEME_NUMBER=$((RANDOM % LINE_NUMBER + 1))
+        ZSH_THEME=$(sed -n "${THEME_NUMBER}p" "$THEMES_LIST" 2>/dev/null)
+        if [ -n "$ZSH_THEME" ]; then
+            THEME_FILE="${MYZSH_DIR}/themes/${ZSH_THEME}.zsh-theme"
+            if [ -f "$THEME_FILE" ]; then
+                source "$THEME_FILE" 2>/dev/null && return
+            fi
+        fi
+    fi
 fi
 
-# Choose a theme out of the pool of candidates
-N=${#themes[@]}
-(( N = (RANDOM%N) + 1 ))
-RANDOM_THEME="${themes[$N]}"
-unset N themes theme
-
-# Source theme
-if [[ -f "$ZSH_CUSTOM/$RANDOM_THEME.zsh-theme" ]]; then
-  source "$ZSH_CUSTOM/$RANDOM_THEME.zsh-theme"
-elif [[ -f "$ZSH_CUSTOM/themes/$RANDOM_THEME.zsh-theme" ]]; then
-  source "$ZSH_CUSTOM/themes/$RANDOM_THEME.zsh-theme"
-elif [[ -f "$ZSH/themes/$RANDOM_THEME.zsh-theme" ]]; then
-  source "$ZSH/themes/$RANDOM_THEME.zsh-theme"
-else
-  echo "[oh-my-zsh] Random theme '${RANDOM_THEME}' not found"
-  return 1
-fi
-
-if [[ "$ZSH_THEME_RANDOM_QUIET" != true ]]; then
-  echo "[oh-my-zsh] Random theme '${RANDOM_THEME}' loaded"
-fi
+# 回退到默认主题
+ZSH_THEME="default"
+source "${MYZSH_DIR}/themes/${ZSH_THEME}.zsh-theme" 2>/dev/null
