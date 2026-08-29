@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-myzsh - Zsh 主题和插件管理工具
+myzsh - Zsh 主题和插件管理工具 (本地功能)
 """
 
 import os
 import sys
 import subprocess
-import shutil
 import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
@@ -49,7 +48,6 @@ class MyZshManager:
     def __init__(self):
         self.myzsh_dir = os.environ.get('MYZSH_DIR', '')
         if not self.myzsh_dir:
-            # 如果未设置，使用默认路径
             home = Path.home()
             self.myzsh_dir = str(home / '.myzsh')
         
@@ -81,7 +79,6 @@ class MyZshManager:
         if self.editor_file.exists():
             try:
                 content = self.editor_file.read_text()
-                # 简单解析 EDITOR=xxx
                 for line in content.splitlines():
                     if line.startswith('EDITOR='):
                         return line.split('=', 1)[1].strip()
@@ -99,35 +96,6 @@ class MyZshManager:
         self._ensure_dirs()
         self.editor_file.write_text(f"EDITOR={editor_cmd}\n")
         print(f"编辑器已设置为: {editor_cmd}")
-    
-    def _clone_repo(self, repo_url: str, target_dir: Path) -> None:
-        """克隆仓库（仅最新版本）"""
-        repo_name = Path(repo_url).stem
-        target_path = target_dir / repo_name
-        
-        if target_path.exists():
-            print(f"目录已存在: {target_path}")
-            response = input("是否更新? (y/N): ").strip().lower()
-            if response in ('y', 'yes'):
-                print("正在更新...")
-                subprocess.run(['git', 'pull', '--depth=1'], cwd=target_path, check=False)
-                print("更新完成!")
-            else:
-                print("跳过更新")
-        else:
-            print(f"正在克隆 {repo_name}...")
-            subprocess.run(['git', 'clone', '--depth=1', repo_url, str(target_path)], check=False)
-            print("克隆完成!")
-    
-    def _install_theme(self, repo_url: str) -> None:
-        """安装主题"""
-        self._ensure_dirs()
-        self._clone_repo(repo_url, self.themes_dir)
-    
-    def _install_plugin(self, repo_url: str) -> None:
-        """安装插件"""
-        self._ensure_dirs()
-        self._clone_repo(repo_url, self.plugins_dir)
     
     def _set_theme(self, theme_name: str) -> None:
         """设置主题"""
@@ -156,12 +124,10 @@ class MyZshManager:
         if self.plugins_file.exists():
             try:
                 content = self.plugins_file.read_text()
-                # 解析 plugins=(...)
                 for line in content.splitlines():
                     if line.startswith('plugins=(') and line.endswith(')'):
                         plugins_str = line[9:-1].strip()
                         if plugins_str:
-                            # 移除引号并分割
                             import shlex
                             return shlex.split(plugins_str)
                 return []
@@ -174,6 +140,45 @@ class MyZshManager:
         plugins_str = ' '.join([f"'{p}'" for p in plugins])
         content = f"plugins=({plugins_str})\n"
         self.plugins_file.write_text(content)
+    
+    def _list_themes(self) -> None:
+        """列出所有已安装的主题"""
+        self._ensure_dirs()
+        
+        print("所有已安装的主题:")
+        
+        if self.themes_dir.exists():
+            theme_dirs = [d for d in self.themes_dir.iterdir() if d.is_dir()]
+            
+            if theme_dirs:
+                # 获取当前主题
+                current_theme = None
+                if self.theme_file.exists():
+                    try:
+                        content = self.theme_file.read_text()
+                        for line in content.splitlines():
+                            if line.startswith('ZSH_THEME='):
+                                current_theme = line.split('=', 1)[1].strip()
+                                break
+                    except:
+                        pass
+                
+                for theme_dir in theme_dirs:
+                    theme_name = theme_dir.name
+                    if theme_name == current_theme:
+                        print(f"  {Colors.green('★')} {theme_name} (当前主题)")
+                    else:
+                        print(f"  ○ {theme_name}")
+                
+                print(f"\n总计: {len(theme_dirs)} 个主题")
+                if current_theme:
+                    print(f"当前主题: {current_theme}")
+            else:
+                print("  (无已安装的主题)")
+                print("\n总计: 0 个主题")
+        else:
+            print("  (无已安装的主题)")
+            print("\n总计: 0 个主题")
     
     def _list_all_plugins(self) -> None:
         """列出所有已安装的插件"""
@@ -196,11 +201,9 @@ class MyZshManager:
                     else:
                         disabled_plugins.append(plugin_name)
                 
-                # 显示未启用的插件
                 for plugin in disabled_plugins:
                     print(f"  ○ {plugin}")
                 
-                # 显示已启用的插件
                 for plugin in enabled_list:
                     print(f"  {Colors.green('●')} {plugin}")
                 
@@ -242,10 +245,8 @@ class MyZshManager:
         """交互式插件管理"""
         self._ensure_dirs()
         
-        # 获取已启用的插件列表
         enabled_plugins = self._get_plugins()
         
-        # 获取所有插件
         all_plugins = []
         enabled_list = []
         disabled_list = []
@@ -260,7 +261,6 @@ class MyZshManager:
                     else:
                         disabled_list.append(plugin_name)
         
-        # 重新排列：先显示已启用的，再显示未启用的
         display_plugins = enabled_list + disabled_list
         display_stat = [1] * len(enabled_list) + [0] * len(disabled_list)
         
@@ -268,12 +268,10 @@ class MyZshManager:
             print("没有安装任何插件")
             return
         
-        # 初始化选中状态：所有已启用的插件默认被选中
         selected = [i for i, stat in enumerate(display_stat) if stat == 1]
         current_index = 0
         total = len(display_plugins)
         
-        # 保存终端设置
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
         
@@ -282,7 +280,6 @@ class MyZshManager:
         
         signal.signal(signal.SIGINT, lambda s, f: (cleanup(), sys.exit(0)))
         
-        # 隐藏光标
         sys.stdout.write('\033[?25l')
         sys.stdout.flush()
         
@@ -291,26 +288,24 @@ class MyZshManager:
                 self._render_plugin_list(display_plugins, display_stat, selected, 
                                         current_index, total)
                 
-                # 读取按键
                 tty.setraw(fd)
                 key = sys.stdin.read(1)
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                 
-                if key == '\x1b':  # ESC
+                if key == '\x1b':
                     key2 = sys.stdin.read(1)
                     if key2 == '[':
                         key3 = sys.stdin.read(1)
-                        if key3 == 'A':  # 上键
+                        if key3 == 'A':
                             current_index = (current_index - 1) % total
-                        elif key3 == 'B':  # 下键
+                        elif key3 == 'B':
                             current_index = (current_index + 1) % total
                     else:
-                        # ESC 键 - 取消
                         sys.stdout.write('\033[?25h')
                         sys.stdout.flush()
                         print("操作已取消")
                         return
-                elif key == ' ':  # 空格键 - 切换选中
+                elif key == ' ':
                     if current_index in selected:
                         selected.remove(current_index)
                         display_stat[current_index] = 0
@@ -318,8 +313,7 @@ class MyZshManager:
                         selected.append(current_index)
                         selected.sort()
                         display_stat[current_index] = 1
-                elif key in ('\r', '\n'):  # Enter 键 - 确认
-                    # 构建新的插件列表
+                elif key in ('\r', '\n'):
                     new_enabled = [display_plugins[i] for i in selected]
                     self._write_plugins(new_enabled)
                     
@@ -343,15 +337,12 @@ class MyZshManager:
     def _render_plugin_list(self, display_plugins: List[str], display_stat: List[int],
                            selected: List[int], current_index: int, total: int) -> None:
         """渲染插件列表"""
-        # 清屏并回到顶部
         sys.stdout.write('\033[2J\033[H')
         
-        # 显示标题
         print(Colors.cyan("插件管理器 - 使用上下键移动，空格切换选中，Enter确认，ESC取消"))
         print(Colors.yellow("提示：选中的插件将会被启用"))
         print()
         
-        # 获取终端行数
         try:
             import shutil
             term_lines = shutil.get_terminal_size().lines
@@ -361,7 +352,6 @@ class MyZshManager:
         except:
             max_display_lines = 20
         
-        # 计算显示范围
         start_line = 0
         end_line = total
         
@@ -371,7 +361,6 @@ class MyZshManager:
             if end_line - start_line < max_display_lines:
                 start_line = max(0, end_line - max_display_lines)
         
-        # 显示插件列表
         for i in range(start_line, end_line):
             plugin = display_plugins[i]
             stat = display_stat[i]
@@ -380,18 +369,13 @@ class MyZshManager:
             prefix = '●' if is_selected else '○'
             
             if i == current_index:
-                # 当前选中行 - 蓝色高亮
                 print(f"{Colors.blue('▶')} {prefix} {plugin}")
             else:
-                # 非当前选中行
                 if stat == 1:
-                    # 已启用 - 绿色
                     print(f"  {Colors.green(prefix)} {plugin}")
                 else:
-                    # 未启用 - 普通颜色
                     print(f"  {prefix} {plugin}")
         
-        # 显示统计信息
         print()
         enabled_count = sum(1 for s in display_stat if s == 1)
         print(Colors.yellow(f"已选中: {len(selected)} 个插件"))
@@ -407,7 +391,6 @@ class MyZshManager:
         self._ensure_dirs()
         current_plugins = self._get_plugins()
         
-        # 添加新插件（去重）
         added = []
         new_plugins = current_plugins.copy()
         for plugin in plugin_names:
@@ -432,7 +415,6 @@ class MyZshManager:
         self._ensure_dirs()
         current_plugins = self._get_plugins()
         
-        # 移除插件
         removed = []
         new_plugins = []
         for plugin in current_plugins:
@@ -463,10 +445,8 @@ class MyZshManager:
         editor_cmd = self._get_editor()
         full_path = self.config_dir / config_path
         
-        # 确保目录存在
         full_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # 如果文件不存在，创建空文件
         if not full_path.exists():
             full_path.touch()
             print(f"已创建新文件: {full_path}")
@@ -477,14 +457,14 @@ class MyZshManager:
     
     def _show_help(self) -> None:
         """显示帮助信息"""
+        program_name = os.path.basename(sys.argv[0])
         help_text = f"""
-用法: myzsh <命令> [参数]
+用法: {program_name} <命令> [参数]
 
 命令:
-    theme install <仓库地址>    安装主题
     theme set <主题名>          设置当前主题
     theme config <路径>         设置主题配置文件路径
-    plugin install <仓库地址>   安装插件
+    theme list                  列出所有已安装的主题
     plugin                      交互式插件管理（上下选择，空格切换，Enter确认）
     plugin add <插件名>...      启用已安装的插件
     plugin remove <插件名>...   移除已启用的插件
@@ -492,6 +472,8 @@ class MyZshManager:
     edit <路径>                 编辑配置文件（路径相对于 {self.config_dir}/）
     edit set <编辑器命令>       设置默认编辑器
     help                        显示此帮助信息
+
+注意：安装主题和插件请使用 myzshpack 命令
 
 交互式插件管理:
     上下键: 移动选择
@@ -503,27 +485,25 @@ class MyZshManager:
     {self.config_myzsh_dir}/         (myzsh 加载配置的目录)
 
 配置文件示例:
-    myzsh edit myzsh/theme          # 编辑主题设置
-    myzsh edit myzsh/theme_config   # 编辑主题配置路径
-    myzsh edit myzsh/plugins        # 编辑插件列表
-    myzsh edit myzsh/edit           # 编辑编辑器设置
-    myzsh edit custom/my.conf       # 编辑自定义配置文件
+    {program_name} edit myzsh/theme          # 编辑主题设置
+    {program_name} edit myzsh/theme_config   # 编辑主题配置路径
+    {program_name} edit myzsh/plugins        # 编辑插件列表
+    {program_name} edit myzsh/edit           # 编辑编辑器设置
+    {program_name} edit custom/my.conf       # 编辑自定义配置文件
 
 示例:
-    myzsh theme install https://github.com/user/theme-repo.git
-    myzsh plugin install https://github.com/user/plugin-repo.git
-    myzsh theme set mytheme
-    myzsh theme config /path/to/theme.config
-    myzsh plugin                     # 进入交互式插件管理
-    myzsh plugin add git zsh-autosuggestions
-    myzsh plugin remove git
-    myzsh plugin list                # 列出所有已安装的插件（○未启用，●已启用）
-    myzsh plugin list true           # 列出已启用的插件（含统计）
-    myzsh edit myzsh/plugins
-    myzsh edit myzsh/theme
-    myzsh edit set vim
-    myzsh edit set /usr/bin/nano
-    myzsh edit custom/myconfig.conf
+    {program_name} theme set mytheme
+    {program_name} theme config /path/to/theme.config
+    {program_name} theme list                # 列出所有已安装的主题
+    {program_name} plugin                     # 进入交互式插件管理
+    {program_name} plugin add git zsh-autosuggestions
+    {program_name} plugin remove git
+    {program_name} plugin list                # 列出所有已安装的插件（○未启用，●已启用）
+    {program_name} plugin list true           # 列出已启用的插件（含统计）
+    {program_name} edit myzsh/plugins
+    {program_name} edit myzsh/theme
+    {program_name} edit set vim
+    {program_name} edit set /usr/bin/nano
 """
         print(help_text)
     
@@ -539,20 +519,13 @@ class MyZshManager:
         if cmd == 'theme':
             if len(args) < 1:
                 print(Colors.red("错误: theme 需要指定子命令"))
-                print("用法: myzsh theme <install|set|config> <参数>")
+                print("用法: myzsh theme <set|config|list> <参数>")
                 return 1
             
             subcmd = args[0]
             subargs = args[1:]
             
-            if subcmd == 'install':
-                if len(subargs) < 1:
-                    print(Colors.red("错误: 请指定主题仓库地址"))
-                    print("用法: myzsh theme install <仓库地址>")
-                    return 1
-                self._install_theme(subargs[0])
-            
-            elif subcmd == 'set':
+            if subcmd == 'set':
                 if len(subargs) < 1:
                     print(Colors.red("错误: 请指定主题名称"))
                     print("用法: myzsh theme set <主题名>")
@@ -566,27 +539,22 @@ class MyZshManager:
                     return 1
                 self._set_theme_config(subargs[0])
             
+            elif subcmd == 'list':
+                self._list_themes()
+            
             else:
                 print(Colors.red(f"错误: 未知 theme 子命令 '{subcmd}'"))
-                print("可用子命令: install, set, config")
+                print("可用子命令: set, config, list")
                 return 1
         
         elif cmd == 'plugin':
             if len(args) == 0:
-                # 无参数时进入交互模式
                 self._interactive_plugin_manager()
             else:
                 subcmd = args[0]
                 subargs = args[1:]
                 
-                if subcmd == 'install':
-                    if len(subargs) < 1:
-                        print(Colors.red("错误: 请指定插件仓库地址"))
-                        print("用法: myzsh plugin install <仓库地址>")
-                        return 1
-                    self._install_plugin(subargs[0])
-                
-                elif subcmd == 'add':
+                if subcmd == 'add':
                     self._add_plugins(*subargs)
                 
                 elif subcmd == 'remove':
@@ -598,7 +566,7 @@ class MyZshManager:
                 
                 else:
                     print(Colors.red(f"错误: 未知 plugin 子命令 '{subcmd}'"))
-                    print("可用子命令: install, add, remove, list")
+                    print("可用子命令: add, remove, list")
                     print("直接运行 'myzsh plugin' 进入交互式模式")
                     return 1
         

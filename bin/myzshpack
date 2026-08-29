@@ -1,0 +1,876 @@
+#!/usr/bin/env python3
+"""
+myzshpack - Zsh 主题和插件包管理工具 (在线仓库 + 手动安装)
+"""
+
+import os
+import sys
+import json
+import urllib.request
+import urllib.error
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Set
+import subprocess
+import shutil
+import tempfile
+import tarfile
+import zipfile
+import configparser
+import re
+from urllib.parse import urlparse
+
+# 颜色定义
+class Colors:
+    GREEN = '\033[0;32m'
+    BLUE = '\033[0;34m'
+    YELLOW = '\033[1;33m'
+    RED = '\033[0;31m'
+    CYAN = '\033[1;36m'
+    NC = '\033[0m'  # No Color
+    
+    @staticmethod
+    def green(text: str) -> str:
+        return f"{Colors.GREEN}{text}{Colors.NC}"
+    
+    @staticmethod
+    def blue(text: str) -> str:
+        return f"{Colors.BLUE}{text}{Colors.NC}"
+    
+    @staticmethod
+    def yellow(text: str) -> str:
+        return f"{Colors.YELLOW}{text}{Colors.NC}"
+    
+    @staticmethod
+    def red(text: str) -> str:
+        return f"{Colors.RED}{text}{Colors.NC}"
+    
+    @staticmethod
+    def cyan(text: str) -> str:
+        return f"{Colors.CYAN}{text}{Colors.NC}"
+
+
+class MyZshPackManager:
+    def __init__(self):
+        self.myzsh_dir = os.environ.get('MYZSH_DIR', '')
+        if not self.myzsh_dir:
+            home = Path.home()
+            self.myzsh_dir = str(home / '.myzsh')
+        
+        # 所有配置都迁移到 myzshpack 目录
+        self.config_dir = Path(self.myzsh_dir) / 'config'
+        self.myzshpack_config_dir = self.config_dir / 'myzshpack'
+        self.index_file = self.myzshpack_config_dir / '_temp_index.json'
+        self.packages_repo_file = self.myzshpack_config_dir / 'packages_repo.json'
+        self.env_file = self.myzshpack_config_dir / 'env'
+        self.themes_dir = Path(self.myzsh_dir) / 'themes'
+        self.plugins_dir = Path(self.myzsh_dir) / 'plugins'
+        
+        # 确保目录存在
+        self.themes_dir.mkdir(parents=True, exist_ok=True)
+        self.plugins_dir.mkdir(parents=True, exist_ok=True)
+        self.myzshpack_config_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 如果packages_repo.json不存在，创建默认配置
+        if not self.packages_repo_file.exists():
+            default_repo = {
+                "repo": [
+                    {
+                        "name": "default",
+                        "index": "https://raw.github.com/mcmineleng/myzsh-package/main/index.json"
+                    }
+                ]
+            }
+            self.packages_repo_file.write_text(json.dumps(default_repo, indent=2))
+        
+        # 如果env文件不存在，创建示例
+        if not self.env_file.exists():
+            example_env = """# myzshpack 环境变量配置
+# 优先级（从低到高）:
+# [default] < index.json的env < [global] < [仓库名] < 预设变量
+
+[default]
+# 最低优先级，所有其他地方都找不到时才使用
+# REPO_BASE=https://github.com
+
+[global]
+# 全局配置（覆盖 index.json 的 env）
+# REPO_BASE=https://github.com
+
+[仓库名]
+# 仓库特定配置（覆盖 global）
+# REPO_BASE=https://gitee.com
+"""
+            self.env_file.write_text(example_env)
+    
+    def _load_env_config(self, repo_name: str = None, load_default: bool = True) -> Dict[str, str]:
+        """
+        加载环境变量配置
+        优先级（从低到高）:
+        1. [default] - 最低优先级
+        2. [global]
+        3. [仓库名] - 最高优先级
+        """
+        env_vars = {}
+        
+        if not self.env_file.exists():
+            return env_vars
+        
+        try:
+            config = configparser.ConfigParser()
+            config.read(self.env_file)
+            
+            # 先加载 default（最低优先级）
+            if load_default and config.has_section('default'):
+                for key, value in config.items('default'):
+                    env_vars[key] = value
+            
+            # 再加载 global（覆盖 default）
+            if config.has_section('global'):
+                for key, value in config.items('global'):
+                    env_vars[key] = value
+            
+            # 最后加载仓库特定配置（最高优先级，覆盖 global）
+            if repo_name and config.has_section(repo_name):
+                for key, value in config.items(repo_name):
+                    env_vars[key] = value
+        except Exception as e:
+            print(Colors.yellow(f"加载环境变量配置失败: {e}"))
+        
+        return env_vars
+    
+    def _resolve_variables(self, text: str, variables: Dict[str, str]) -> str:
+        """解析字符串中的变量 ${VAR}"""
+        def replace_var(match):
+            var_name = match.group(1)
+            # 如果变量不存在，保留原样
+            return variables.get(var_name, match.group(0))
+        
+        # 使用正则替换 ${VAR} 格式的变量
+        pattern = r'\$\{([^}]+)\}'
+        result = re.sub(pattern, replace_var, text)
+        return result
+    
+    def _resolve_item_url(self, item: Dict, variables: Dict[str, str]) -> str:
+        """解析 item 的 URL，替换变量"""
+        url = item.get('url', '')
+        if url:
+            return self._resolve_variables(url, variables)
+        return url
+    
+    def _load_packages_repo(self) -> Dict[str, Any]:
+        """加载包仓库配置"""
+        try:
+            if self.packages_repo_file.exists():
+                content = self.packages_repo_file.read_text()
+                return json.loads(content)
+        except Exception as e:
+            print(Colors.red(f"加载包仓库配置失败: {e}"))
+        return {"repo": []}
+    
+    def _save_packages_repo(self, repo_config: Dict[str, Any]) -> None:
+        """保存包仓库配置"""
+        self.packages_repo_file.write_text(json.dumps(repo_config, indent=2))
+    
+    def _load_index(self) -> Dict[str, Any]:
+        """加载索引文件"""
+        try:
+            if self.index_file.exists():
+                content = self.index_file.read_text()
+                return json.loads(content)
+        except Exception as e:
+            print(Colors.yellow(f"加载索引文件失败: {e}"))
+        return {"themes": [], "plugins": []}
+    
+    def _save_index(self, index_data: Dict[str, Any]) -> None:
+        """保存索引文件"""
+        self.index_file.write_text(json.dumps(index_data, indent=2))
+    
+    def _fetch_index_from_url(self, url: str) -> Optional[Dict[str, Any]]:
+        """从URL获取索引数据"""
+        try:
+            print(f"正在从 {url} 获取索引...")
+            with urllib.request.urlopen(url, timeout=10) as response:
+                data = response.read().decode('utf-8')
+                return json.loads(data)
+        except urllib.error.URLError as e:
+            print(Colors.red(f"网络错误: {e}"))
+            return None
+        except json.JSONDecodeError as e:
+            print(Colors.red(f"JSON解析错误: {e}"))
+            return None
+        except Exception as e:
+            print(Colors.red(f"获取索引失败: {e}"))
+            return None
+    
+    def update(self) -> None:
+        """更新索引"""
+        repo_config = self._load_packages_repo()
+        repos = repo_config.get('repo', [])
+        
+        if not repos:
+            print(Colors.yellow("没有配置任何仓库"))
+            print("请编辑配置文件添加仓库:")
+            print(f"  {self.packages_repo_file}")
+            return
+        
+        merged_themes: Dict[str, Dict] = {}
+        merged_plugins: Dict[str, Dict] = {}
+        
+        for repo in repos:
+            repo_name = repo.get('name', 'unknown')
+            index_url = repo.get('index')
+            
+            if not index_url:
+                print(Colors.yellow(f"仓库 {repo_name} 缺少索引URL，跳过"))
+                continue
+            
+            # 获取索引数据
+            index_data = self._fetch_index_from_url(index_url)
+            if not index_data:
+                print(Colors.red(f"仓库 {repo_name} 索引获取失败，跳过"))
+                continue
+            
+            # 从索引中提取 env 变量
+            index_env = {}
+            if 'env' in index_data and isinstance(index_data['env'], list):
+                for env_item in index_data['env']:
+                    if isinstance(env_item, dict):
+                        for key, value in env_item.items():
+                            index_env[key] = value
+            
+            # 加载本地环境变量
+            # 1. 先加载 default（最低优先级）
+            default_env = self._load_env_config(None, load_default=True)
+            # 2. 再加载 global + repo（覆盖 index_env）
+            local_env = self._load_env_config(repo_name, load_default=False)
+            
+            # 预设变量
+            parsed_url = urlparse(index_url)
+            preset_vars = {
+                'INDEX_BASE_URL': index_url,
+                'INDEX_DOMAIN': f"{parsed_url.scheme}://{parsed_url.netloc}" if parsed_url.scheme else parsed_url.netloc
+            }
+            
+            # 合并变量（优先级从低到高）
+            # 1. default_env (最低)
+            # 2. index_env (索引定义)
+            # 3. local_env (global + repo，覆盖 index_env)
+            # 4. preset_vars (最高)
+            merged_vars = {}
+            merged_vars.update(default_env)   # default (最低)
+            merged_vars.update(index_env)     # index env (覆盖 default)
+            merged_vars.update(local_env)     # global + repo (覆盖 index_env)
+            merged_vars.update(preset_vars)   # preset (最高)
+            
+            # 解析主题
+            for theme in index_data.get('themes', []):
+                theme_id = theme.get('id')
+                if theme_id:
+                    resolved_theme = theme.copy()
+                    if 'url' in resolved_theme:
+                        resolved_theme['url'] = self._resolve_variables(
+                            resolved_theme['url'], merged_vars
+                        )
+                    
+                    if theme_id not in merged_themes:
+                        merged_themes[theme_id] = resolved_theme
+                    else:
+                        print(Colors.yellow(f"主题 {theme_id} 在多个仓库中存在，保留第一个"))
+            
+            # 解析插件
+            for plugin in index_data.get('plugins', []):
+                plugin_id = plugin.get('id')
+                if plugin_id:
+                    resolved_plugin = plugin.copy()
+                    if 'url' in resolved_plugin:
+                        resolved_plugin['url'] = self._resolve_variables(
+                            resolved_plugin['url'], merged_vars
+                        )
+                    
+                    if plugin_id not in merged_plugins:
+                        merged_plugins[plugin_id] = resolved_plugin
+                    else:
+                        print(Colors.yellow(f"插件 {plugin_id} 在多个仓库中存在，保留第一个"))
+            
+            print(Colors.green(f"仓库 {repo_name} 索引合并完成"))
+            print(f"  变量: {list(merged_vars.keys())}")
+        
+        # 保存合并后的索引
+        merged_index = {
+            "themes": list(merged_themes.values()),
+            "plugins": list(merged_plugins.values())
+        }
+        self._save_index(merged_index)
+        
+        print(Colors.green(f"索引更新完成!"))
+        print(f"  主题: {len(merged_themes)} 个")
+        print(f"  插件: {len(merged_plugins)} 个")
+    
+    def _clone_repo(self, repo_url: str, target_dir: Path) -> None:
+        """克隆仓库（仅最新版本）"""
+        repo_name = Path(repo_url).stem
+        target_path = target_dir / repo_name
+        
+        if target_path.exists():
+            print(f"目录已存在: {target_path}")
+            response = input("是否更新? (y/N): ").strip().lower()
+            if response in ('y', 'yes'):
+                print("正在更新...")
+                subprocess.run(['git', 'pull', '--depth=1'], cwd=target_path, check=False)
+                print("更新完成!")
+            else:
+                print("跳过更新")
+        else:
+            print(f"正在克隆 {repo_name}...")
+            subprocess.run(['git', 'clone', '--depth=1', repo_url, str(target_path)], check=False)
+            if target_path.exists():
+                print(Colors.green("安装成功!"))
+            else:
+                print(Colors.red("安装失败"))
+    
+    def _download_file(self, url: str, target_path: Path) -> bool:
+        """下载文件"""
+        try:
+            print(f"正在下载 {url} ...")
+            with urllib.request.urlopen(url, timeout=30) as response:
+                with open(target_path, 'wb') as f:
+                    f.write(response.read())
+            return True
+        except Exception as e:
+            print(Colors.red(f"下载失败: {e}"))
+            return False
+    
+    def _extract_archive(self, archive_path: Path, target_dir: Path, archive_type: str) -> bool:
+        """解压归档文件"""
+        try:
+            if archive_type == 'zip':
+                with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                    zip_ref.extractall(target_dir)
+            elif archive_type in ['tar.gz', 'tgz']:
+                with tarfile.open(archive_path, 'r:gz') as tar_ref:
+                    tar_ref.extractall(target_dir)
+            elif archive_type == 'tar':
+                with tarfile.open(archive_path, 'r') as tar_ref:
+                    tar_ref.extractall(target_dir)
+            else:
+                if archive_path.suffix == '.zip':
+                    with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                        zip_ref.extractall(target_dir)
+                elif archive_path.suffix in ['.gz', '.tgz']:
+                    with tarfile.open(archive_path, 'r:gz') as tar_ref:
+                        tar_ref.extractall(target_dir)
+                else:
+                    print(Colors.red(f"不支持的归档类型: {archive_type}"))
+                    return False
+            return True
+        except Exception as e:
+            print(Colors.red(f"解压失败: {e}"))
+            return False
+    
+    def _install_from_archive(self, url: str, target_dir: Path, archive_type: str, item_id: str) -> None:
+        """从压缩包安装"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            filename = Path(url).name
+            if not filename or '.' not in filename:
+                if archive_type == 'zip':
+                    filename = f"{item_id}.zip"
+                elif archive_type in ['tar.gz', 'tgz']:
+                    filename = f"{item_id}.tar.gz"
+                elif archive_type == 'tar':
+                    filename = f"{item_id}.tar"
+                else:
+                    filename = f"{item_id}.{archive_type}"
+            
+            archive_file = temp_path / filename
+            if not self._download_file(url, archive_file):
+                return
+            
+            print(f"正在解压 {item_id} ...")
+            extract_dir = temp_path / 'extract'
+            extract_dir.mkdir()
+            
+            if not self._extract_archive(archive_file, extract_dir, archive_type):
+                return
+            
+            extracted_items = list(extract_dir.iterdir())
+            if not extracted_items:
+                print(Colors.red("解压后没有内容"))
+                return
+            
+            target_path = target_dir / item_id
+            if target_path.exists():
+                shutil.rmtree(target_path)
+            
+            if len(extracted_items) == 1 and extracted_items[0].is_dir():
+                shutil.move(str(extracted_items[0]), str(target_path))
+            else:
+                target_path.mkdir()
+                for item in extracted_items:
+                    shutil.move(str(item), str(target_path / item.name))
+            
+            print(Colors.green(f"安装成功!"))
+    
+    def _install_manual(self, item_type: str, item_name: str, url: str, archive_type: str = 'git') -> None:
+        """手动安装主题或插件"""
+        if item_type == 'theme':
+            target_dir = self.themes_dir
+            item_label = "主题"
+        else:
+            target_dir = self.plugins_dir
+            item_label = "插件"
+        
+        print(f"正在安装{item_label} {item_name} ...")
+        
+        if archive_type == 'git':
+            self._clone_repo(url, target_dir)
+        else:
+            self._install_from_archive(url, target_dir, archive_type, item_name)
+    
+    def _install_from_repo(self, item_id: str, item_type: str, item_data: Dict) -> None:
+        """从仓库安装主题或插件"""
+        url = item_data.get('url')
+        archive_type = item_data.get('type', 'git')
+        
+        if not url:
+            print(Colors.red(f"错误: {item_id} 没有URL"))
+            return
+        
+        if item_type == 'theme':
+            target_dir = self.themes_dir
+            item_label = "主题"
+        else:
+            target_dir = self.plugins_dir
+            item_label = "插件"
+        
+        target_path = target_dir / item_id
+        
+        if target_path.exists():
+            print(Colors.yellow(f"{item_label} {item_id} 已存在"))
+            response = input("是否覆盖? (y/N): ").strip().lower()
+            if response not in ('y', 'yes'):
+                print("跳过安装")
+                return
+            shutil.rmtree(target_path)
+        
+        print(f"正在安装{item_label} {item_id} ...")
+        
+        if archive_type == 'git':
+            subprocess.run(['git', 'clone', '--depth=1', url, str(target_path)], check=False)
+            if target_path.exists():
+                print(Colors.green(f"{item_label} {item_id} 安装成功!"))
+            else:
+                print(Colors.red(f"{item_label} {item_id} 安装失败"))
+        else:
+            self._install_from_archive(url, target_dir, archive_type, item_id)
+    
+    def install(self, name: str, target_type: Optional[str] = None) -> None:
+        """安装主题或插件"""
+        if not name:
+            print(Colors.red("错误: 请指定要安装的名称或URL"))
+            return
+        
+        # 检查是否是URL（手动安装）
+        if name.startswith(('http://', 'https://', 'git@')):
+            if target_type not in ['theme', 'plugin']:
+                print(Colors.red("错误: 手动安装需要指定类型"))
+                print(f"用法: {os.path.basename(sys.argv[0])} install theme <URL> [类型]")
+                print(f"      {os.path.basename(sys.argv[0])} install plugin <URL> [类型]")
+                return
+            
+            if len(sys.argv) > 3:
+                archive_type = sys.argv[3]
+            else:
+                archive_type = 'git'
+            
+            url_path = Path(name)
+            if url_path.stem:
+                item_name = url_path.stem
+            else:
+                item_name = name.split('/')[-1].split('.')[0]
+            
+            self._install_manual(target_type, item_name, name, archive_type)
+            return
+        
+        # 从仓库安装
+        index_data = self._load_index()
+        themes = index_data.get('themes', [])
+        plugins = index_data.get('plugins', [])
+        
+        matched_themes = [t for t in themes if t.get('id') == name]
+        matched_plugins = [p for p in plugins if p.get('id') == name]
+        
+        if target_type:
+            if target_type == 'theme':
+                if matched_themes:
+                    self._install_from_repo(name, 'theme', matched_themes[0])
+                else:
+                    print(Colors.red(f"未找到主题: {name}"))
+                return
+            elif target_type == 'plugin':
+                if matched_plugins:
+                    self._install_from_repo(name, 'plugin', matched_plugins[0])
+                else:
+                    print(Colors.red(f"未找到插件: {name}"))
+                return
+            else:
+                print(Colors.red(f"错误: 未知类型 '{target_type}'，请使用 'theme' 或 'plugin'"))
+                return
+        
+        if not matched_themes and not matched_plugins:
+            print(Colors.red(f"未找到: {name}"))
+            print(f"提示: 先运行 '{os.path.basename(sys.argv[0])} update' 更新索引")
+            return
+        
+        if matched_themes and not matched_plugins:
+            print(f"找到主题: {name}")
+            self._install_from_repo(name, 'theme', matched_themes[0])
+            return
+        
+        if matched_plugins and not matched_themes:
+            print(f"找到插件: {name}")
+            self._install_from_repo(name, 'plugin', matched_plugins[0])
+            return
+        
+        if matched_themes and matched_plugins:
+            print(f"找到主题和插件都名为 '{name}':")
+            print("  1. 安装主题")
+            print("  2. 安装插件")
+            choice = input("请选择 (1/2): ").strip()
+            if choice == '1':
+                self._install_from_repo(name, 'theme', matched_themes[0])
+            elif choice == '2':
+                self._install_from_repo(name, 'plugin', matched_plugins[0])
+            else:
+                print(Colors.yellow("取消安装"))
+            return
+    
+    def remove(self, name: str, target_type: Optional[str] = None) -> None:
+        """移除主题或插件"""
+        if not name:
+            print(Colors.red("错误: 请指定要移除的名称"))
+            return
+        
+        # 检查是否是指定类型
+        if target_type:
+            if target_type == 'theme':
+                target_dir = self.themes_dir
+                item_label = "主题"
+            elif target_type == 'plugin':
+                target_dir = self.plugins_dir
+                item_label = "插件"
+            else:
+                print(Colors.red(f"错误: 未知类型 '{target_type}'，请使用 'theme' 或 'plugin'"))
+                return
+            
+            target_path = target_dir / name
+            if not target_path.exists():
+                print(Colors.yellow(f"{item_label} {name} 未安装"))
+                return
+            
+            print(f"找到{item_label}: {name}")
+            response = input(f"是否移除{item_label} {name}? (y/N): ").strip().lower()
+            if response in ('y', 'yes'):
+                shutil.rmtree(target_path)
+                print(Colors.green(f"{item_label} {name} 已移除"))
+            else:
+                print("取消移除")
+            return
+        
+        # 没有指定类型，检查是否存在
+        theme_path = self.themes_dir / name
+        plugin_path = self.plugins_dir / name
+        theme_exists = theme_path.exists()
+        plugin_exists = plugin_path.exists()
+        
+        if not theme_exists and not plugin_exists:
+            print(Colors.yellow(f"未找到: {name}"))
+            return
+        
+        if theme_exists and plugin_exists:
+            print(f"找到主题和插件都名为 '{name}':")
+            print("  1. 移除主题")
+            print("  2. 移除插件")
+            print("  3. 全部移除")
+            choice = input("请选择 (1/2/3): ").strip()
+            if choice == '1':
+                shutil.rmtree(theme_path)
+                print(Colors.green(f"主题 {name} 已移除"))
+            elif choice == '2':
+                shutil.rmtree(plugin_path)
+                print(Colors.green(f"插件 {name} 已移除"))
+            elif choice == '3':
+                shutil.rmtree(theme_path)
+                shutil.rmtree(plugin_path)
+                print(Colors.green(f"主题和插件 {name} 已全部移除"))
+            else:
+                print(Colors.yellow("取消移除"))
+            return
+        
+        if theme_exists:
+            print(f"找到主题: {name}")
+            response = input(f"是否移除主题 {name}? (y/N): ").strip().lower()
+            if response in ('y', 'yes'):
+                shutil.rmtree(theme_path)
+                print(Colors.green(f"主题 {name} 已移除"))
+            else:
+                print("取消移除")
+            return
+        
+        if plugin_exists:
+            print(f"找到插件: {name}")
+            response = input(f"是否移除插件 {name}? (y/N): ").strip().lower()
+            if response in ('y', 'yes'):
+                shutil.rmtree(plugin_path)
+                print(Colors.green(f"插件 {name} 已移除"))
+            else:
+                print("取消移除")
+            return
+    
+    def search(self, query: str) -> None:
+        """搜索主题或插件"""
+        if not query:
+            print(Colors.red("错误: 请指定搜索关键词"))
+            return
+        
+        index_data = self._load_index()
+        themes = index_data.get('themes', [])
+        plugins = index_data.get('plugins', [])
+        
+        matched_themes = [t for t in themes if query.lower() in t.get('id', '').lower()]
+        matched_plugins = [p for p in plugins if query.lower() in p.get('id', '').lower()]
+        
+        if not matched_themes and not matched_plugins:
+            print(Colors.yellow(f"未找到与 '{query}' 匹配的包"))
+            return
+        
+        print(Colors.cyan(f"搜索结果: '{query}'"))
+        
+        if matched_themes:
+            print("\n主题:")
+            for theme in matched_themes:
+                theme_id = theme.get('id', '')
+                theme_url = theme.get('url', '')
+                theme_type = theme.get('type', 'git')
+                print(f"  {Colors.green('●')} {theme_id} ({theme_type})")
+                if theme_url:
+                    print(f"    URL: {theme_url}")
+        
+        if matched_plugins:
+            print("\n插件:")
+            for plugin in matched_plugins:
+                plugin_id = plugin.get('id', '')
+                plugin_url = plugin.get('url', '')
+                plugin_type = plugin.get('type', 'git')
+                print(f"  {Colors.green('●')} {plugin_id} ({plugin_type})")
+                if plugin_url:
+                    print(f"    URL: {plugin_url}")
+        
+        print(f"\n总计: {len(matched_themes)} 个主题, {len(matched_plugins)} 个插件")
+    
+    def list_packages(self) -> None:
+        """列出所有可用的包"""
+        index_data = self._load_index()
+        themes = index_data.get('themes', [])
+        plugins = index_data.get('plugins', [])
+        
+        if not themes and not plugins:
+            print(Colors.yellow("没有可用的包"))
+            print(f"提示: 先运行 '{os.path.basename(sys.argv[0])} update' 更新索引")
+            return
+        
+        print(Colors.cyan("可用的包:"))
+        
+        if themes:
+            print(f"\n{Colors.yellow('主题:')}")
+            for theme in themes:
+                theme_id = theme.get('id', '')
+                theme_type = theme.get('type', 'git')
+                print(f"  {Colors.green('●')} {theme_id} ({theme_type})")
+        
+        if plugins:
+            print(f"\n{Colors.yellow('插件:')}")
+            for plugin in plugins:
+                plugin_id = plugin.get('id', '')
+                plugin_type = plugin.get('type', 'git')
+                print(f"  {Colors.green('●')} {plugin_id} ({plugin_type})")
+        
+        print(f"\n总计: {len(themes)} 个主题, {len(plugins)} 个插件")
+    
+    def list_installed(self) -> None:
+        """列出已安装的主题和插件"""
+        print(Colors.cyan("已安装的包:"))
+        
+        # 列出主题
+        if self.themes_dir.exists():
+            themes = [d for d in self.themes_dir.iterdir() if d.is_dir()]
+            if themes:
+                print(f"\n{Colors.yellow('主题:')}")
+                for theme in themes:
+                    print(f"  {Colors.green('●')} {theme.name}")
+            else:
+                print(f"\n{Colors.yellow('主题:')} (无)")
+        else:
+            print(f"\n{Colors.yellow('主题:')} (无)")
+        
+        # 列出插件
+        if self.plugins_dir.exists():
+            plugins = [d for d in self.plugins_dir.iterdir() if d.is_dir()]
+            if plugins:
+                print(f"\n{Colors.yellow('插件:')}")
+                for plugin in plugins:
+                    print(f"  {Colors.green('●')} {plugin.name}")
+            else:
+                print(f"\n{Colors.yellow('插件:')} (无)")
+        else:
+            print(f"\n{Colors.yellow('插件:')} (无)")
+    
+    def _show_help(self) -> None:
+        """显示帮助信息"""
+        program_name = os.path.basename(sys.argv[0])
+        help_text = f"""
+用法: {program_name} <命令> [参数]
+
+命令:
+    update              更新包索引（从所有配置的仓库获取）
+    install <名称>      从仓库安装主题或插件
+                          - 如果只有一个匹配，直接安装
+                          - 如果主题和插件都有同名，会询问
+    install theme <名称> 从仓库安装指定的主题
+    install plugin <名称> 从仓库安装指定的插件
+    install theme <URL> [类型]  手动安装主题（支持git/zip/tar.gz等）
+    install plugin <URL> [类型]  手动安装插件（支持git/zip/tar.gz等）
+    remove <名称>       移除主题或插件
+                          - 如果只有一个匹配，直接移除
+                          - 如果主题和插件都有同名，会询问
+    remove theme <名称>  移除指定的主题
+    remove plugin <名称>  移除指定的插件
+    search <关键词>     搜索主题或插件
+    list                列出所有可用的包
+    list installed      列出已安装的主题和插件
+    help                显示此帮助信息
+
+配置文件:
+    {self.packages_repo_file}  - 包仓库配置
+    {self.index_file}          - 本地包索引
+    {self.env_file}            - 环境变量配置
+
+环境变量说明:
+    index.json 中的 url 字段支持变量，格式: ${{VAR_NAME}}
+    变量来源（优先级从低到高）:
+    1. env 文件中的 [default] 部分（最低优先级）
+    2. index.json 中的 env 数组
+    3. env 文件中的 [global] 部分（覆盖 index.json）
+    4. env 文件中的 [仓库名] 部分（覆盖 global）
+    5. 预设变量: INDEX_BASE_URL, INDEX_DOMAIN（最高优先级）
+
+env 文件格式 (INI):
+    [default]
+    # 最低优先级
+    REPO_BASE=https://github.com
+    
+    [global]
+    # 覆盖 index.json 的 env
+    REPO_BASE=https://github.com
+    
+    [myrepo]
+    # 仓库特定配置，覆盖 global
+    REPO_BASE=https://gitee.com
+
+示例:
+    # 在线仓库安装
+    {program_name} update
+    {program_name} list
+    {program_name} search git
+    {program_name} install powerlevel10k
+    
+    # 手动安装
+    {program_name} install theme https://github.com/romkatv/powerlevel10k.git
+    {program_name} install plugin https://github.com/zsh-users/zsh-autosuggestions.git
+    
+    # 移除
+    {program_name} remove powerlevel10k    # 如果有同名主题和插件会询问
+    {program_name} remove theme spaceship  # 移除主题
+    {program_name} remove plugin git       # 移除插件
+    
+    # 列出已安装的
+    {program_name} list installed
+"""
+        print(help_text)
+    
+    def run(self, argv: List[str]) -> int:
+        """运行主程序"""
+        if len(argv) < 1:
+            self._show_help()
+            return 1
+        
+        cmd = argv[0]
+        args = argv[1:]
+        
+        if cmd == 'update':
+            self.update()
+        
+        elif cmd == 'install':
+            if len(args) < 1:
+                print(Colors.red("错误: 请指定要安装的名称或URL"))
+                print(f"用法: {os.path.basename(sys.argv[0])} install <名称>")
+                print(f"      {os.path.basename(sys.argv[0])} install theme <名称|URL> [类型]")
+                print(f"      {os.path.basename(sys.argv[0])} install plugin <名称|URL> [类型]")
+                return 1
+            
+            if args[0] in ['theme', 'plugin']:
+                if len(args) < 2:
+                    print(Colors.red(f"错误: 请指定要安装的{args[0]}名称或URL"))
+                    return 1
+                self.install(args[1], args[0])
+            else:
+                self.install(args[0], None)
+        
+        elif cmd == 'remove':
+            if len(args) < 1:
+                print(Colors.red("错误: 请指定要移除的名称"))
+                print(f"用法: {os.path.basename(sys.argv[0])} remove <名称>")
+                print(f"      {os.path.basename(sys.argv[0])} remove theme <名称>")
+                print(f"      {os.path.basename(sys.argv[0])} remove plugin <名称>")
+                return 1
+            
+            if args[0] in ['theme', 'plugin']:
+                if len(args) < 2:
+                    print(Colors.red(f"错误: 请指定要移除的{args[0]}名称"))
+                    return 1
+                self.remove(args[1], args[0])
+            else:
+                self.remove(args[0], None)
+        
+        elif cmd == 'search':
+            if len(args) < 1:
+                print(Colors.red("错误: 请指定搜索关键词"))
+                print(f"用法: {os.path.basename(sys.argv[0])} search <关键词>")
+                return 1
+            self.search(args[0])
+        
+        elif cmd == 'list':
+            if len(args) > 0 and args[0] == 'installed':
+                self.list_installed()
+            else:
+                self.list_packages()
+        
+        elif cmd in ('help', '--help', '-h'):
+            self._show_help()
+        
+        else:
+            print(Colors.red(f"错误: 未知命令 '{cmd}'"))
+            print("可用命令: update, install, remove, search, list, help")
+            self._show_help()
+            return 1
+        
+        return 0
+
+
+def main():
+    manager = MyZshPackManager()
+    sys.exit(manager.run(sys.argv[1:]))
+
+
+if __name__ == '__main__':
+    main()
