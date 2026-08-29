@@ -1,11 +1,10 @@
-_omz_source() {
-#此为Oh-My-Zsh函数的fork的修改
+_myzsh_source() {
   local context filepath="$1"
 
-  # 1. 构造 zstyle 上下文（用于控制别名行为）
+  # 1. 构造 zstyle 上下文
   case "$filepath" in
-  lib/*) context="lib:${filepath:t:r}" ;;         # lib/git.zsh → lib:git
-  plugins/*) context="plugins:${filepath:h:t}" ;; # plugins/git/git.plugin.zsh → plugins:git
+  lib/*) context="lib:${filepath:t:r}" ;;
+  plugins/*) context="plugins:${filepath:h:t}" ;;
   esac
 
   # 2. 检查是否禁用别名
@@ -19,9 +18,10 @@ _omz_source() {
     galiases_pre=("${(@kv)galiases}")
   fi
 
-  # 4. 加载实际文件（优先自定义目录）
+  # 4. 加载实际文件
   if [[ -f "$MYZSH_DIR/$filepath" ]]; then
-    source "$ZSH_CUSTOM/$filepath"
+    source "$MYZSH_DIR/$filepath"
+  fi
 
   # 5. 恢复或清理别名（如果禁用别名）
   if (( disable_aliases )); then
@@ -38,6 +38,6 @@ _omz_source() {
   fi
 }
 for lib_file ("$MYZSH_DIR"/lib/*.zsh); do
-  _omz_source "lib/${lib_file:t}"
+  _myzsh_source "lib/${lib_file:t}"
 done
 unset lib_file
