@@ -66,6 +66,10 @@ myzsh_install() {
     log_info "正在克隆 MyZsh 仓库 · · ·"
     git clone --depth 1 "$MYZSH_REPO" "$MYZSH_DIR" || die "克隆 MyZsh 仓库失败"
     log_info "克隆 MyZsh 仓库成功"
+    log_info "正在授予myzsh执行权限"
+    chmod +x  $MYZSH_DIR/bin/myzsh || die "授予执行权限失败"
+    log_info "正在授予myzshpack执行权限"
+    chmod +x  $MYZSH_DIR/bin/myzshpack || die "授予执行权限失败"
 }
 
 # ===== 克隆 Oh-My-Zsh =====
