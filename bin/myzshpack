@@ -186,113 +186,79 @@ REPO_BASE=https://github.com/
             return None
     
     def update(self) -> None:
-    """更新缓存 - 删除旧缓存，重新获取所有仓库索引"""
-    repo_config = self._load_packages_repo()
-    repos = repo_config.get('repo', [])
-    
-    if not repos:
-        print(Colors.yellow("没有配置任何仓库"))
-        print("请编辑配置文件添加仓库:")
-        print(f"  {self.packages_repo_file}")
-        return
-    
-    # 删除旧的缓存文件
-    if self.cache_file.exists():
-        self.cache_file.unlink()
-        print(Colors.yellow("已删除旧的缓存文件"))
-    
-    cache_data = {}
-    success_count = 0
-    
-    for repo in repos:
-        repo_name = repo.get('name', 'unknown')
-        index_url = repo.get('index')
-        
-        if not index_url:
-            print(Colors.yellow(f"仓库 {repo_name} 缺少索引URL，跳过"))
-            continue
-        
-        print(f"\n{Colors.cyan('=' * 50)}")
-        print(f"处理仓库: {repo_name}")
-        print(Colors.cyan('=' * 50))
-        
-        # 获取索引数据 - 直接二进制读取
-        index_data = self._fetch_index_raw(index_url)
-        if not index_data:
-            print(Colors.red(f"仓库 {repo_name} 索引获取失败，跳过"))
-            continue
-        
-        # 直接保存原始内容到缓存，不做任何处理
-        cache_data[repo_name] = index_data
-        success_count += 1
-        
-        # 统计信息
-        themes_count = len(index_data.get('themes', []))
-        plugins_count = len(index_data.get('plugins', []))
-        env_data = index_data.get('env', {})
-        env_count = len(env_data) if isinstance(env_data, dict) else 0
-        
-        print(Colors.green(f"仓库 {repo_name} 缓存完成"))
-        print(f"  环境变量: {env_count} 个")
-        if env_count > 0:
-            print(f"    {env_data}")
-        else:
-            print(f"    警告: env 为空!")
-        print(f"  主题: {themes_count} 个")
-        print(f"  插件: {plugins_count} 个")
-    
-    # 保存新缓存（只有成功获取的仓库）
-    if cache_data:
-        self._save_cache(cache_data)
-        
-        # 显示汇总
-        total_repos = len(cache_data)
-        total_themes = sum(len(data.get('themes', [])) for data in cache_data.values())
-        total_plugins = sum(len(data.get('plugins', [])) for data in cache_data.values())
-        
-        print(f"\n{Colors.cyan('=' * 50)}")
-        print(Colors.green(f"缓存更新完成!"))
-        print(f"  成功: {success_count} 个仓库")
-        print(f"  失败: {len(repos) - success_count} 个仓库")
-        print(f"  主题: {total_themes} 个")
-        print(f"  插件: {total_plugins} 个")
-        print(Colors.cyan('=' * 50))
-    else:
-        print(Colors.red("没有成功获取任何仓库索引，缓存未更新"))
-    
-    def _get_env_for_item(self, repo_name: str, index_url: str) -> Dict[str, str]:
-        """
-        获取安装包时需要的环境变量
-        优先级: index.env < env文件 < 预设变量
-        """
-        # 1. 从缓存获取索引的 env（原始保存，不做任何处理）
-        cache_data = self._load_cache()
-        repo_data = cache_data.get(repo_name, {})
-        index_env = repo_data.get('env', {})  # 直接取原始数据
-        
-        # 2. 从本地 env 文件加载
-        local_env = self._load_env_for_repo(repo_name)
-        
-        # 3. 预设变量
+        """更新缓存 - 删除旧缓存，重新获取所有仓库索引"""
         repo_config = self._load_packages_repo()
-        for repo in repo_config.get('repo', []):
-            if repo.get('name') == repo_name:
-                index_url = repo.get('index', '')
-                break
+        repos = repo_config.get('repo', [])
         
-        parsed_url = urlparse(index_url)
-        preset_vars = {
-            'INDEX_BASE_URL': index_url,
-            'INDEX_DOMAIN': f"{parsed_url.scheme}://{parsed_url.netloc}" if parsed_url.scheme else parsed_url.netloc
-        }
+        if not repos:
+            print(Colors.yellow("没有配置任何仓库"))
+            print("请编辑配置文件添加仓库:")
+            print(f"  {self.packages_repo_file}")
+            return
         
-        # 4. 合并变量
-        merged_vars = {}
-        merged_vars.update(index_env)      # index.env (最低)
-        merged_vars.update(local_env)      # env文件
-        merged_vars.update(preset_vars)    # 预设变量 (最高)
+        # 删除旧的缓存文件
+        if self.cache_file.exists():
+            self.cache_file.unlink()
+            print(Colors.yellow("已删除旧的缓存文件"))
         
-        return merged_vars
+        cache_data = {}
+        success_count = 0
+        
+        for repo in repos:
+            repo_name = repo.get('name', 'unknown')
+            index_url = repo.get('index')
+            
+            if not index_url:
+                print(Colors.yellow(f"仓库 {repo_name} 缺少索引URL，跳过"))
+                continue
+            
+            print(f"\n{Colors.cyan('=' * 50)}")
+            print(f"处理仓库: {repo_name}")
+            print(Colors.cyan('=' * 50))
+            
+            # 获取索引数据 - 直接二进制读取
+            index_data = self._fetch_index_raw(index_url)
+            if not index_data:
+                print(Colors.red(f"仓库 {repo_name} 索引获取失败，跳过"))
+                continue
+            
+            # 直接保存原始内容到缓存，不做任何处理
+            cache_data[repo_name] = index_data
+            success_count += 1
+            
+            # 统计信息
+            themes_count = len(index_data.get('themes', []))
+            plugins_count = len(index_data.get('plugins', []))
+            env_data = index_data.get('env', {})
+            env_count = len(env_data) if isinstance(env_data, dict) else 0
+            
+            print(Colors.green(f"仓库 {repo_name} 缓存完成"))
+            print(f"  环境变量: {env_count} 个")
+            if env_count > 0:
+                print(f"    {env_data}")
+            else:
+                print(f"    警告: env 为空!")
+            print(f"  主题: {themes_count} 个")
+            print(f"  插件: {plugins_count} 个")
+        
+        # 保存新缓存（只有成功获取的仓库）
+        if cache_data:
+            self._save_cache(cache_data)
+            
+            # 显示汇总
+            total_repos = len(cache_data)
+            total_themes = sum(len(data.get('themes', [])) for data in cache_data.values())
+            total_plugins = sum(len(data.get('plugins', [])) for data in cache_data.values())
+            
+            print(f"\n{Colors.cyan('=' * 50)}")
+            print(Colors.green(f"缓存更新完成!"))
+            print(f"  成功: {success_count} 个仓库")
+            print(f"  失败: {len(repos) - success_count} 个仓库")
+            print(f"  主题: {total_themes} 个")
+            print(f"  插件: {total_plugins} 个")
+            print(Colors.cyan('=' * 50))
+        else:
+            print(Colors.red("没有成功获取任何仓库索引，缓存未更新"))
     
     def _find_in_cache(self, item_id: str) -> List[Tuple[str, str, Dict[str, Any]]]:
         """在缓存中查找包"""
