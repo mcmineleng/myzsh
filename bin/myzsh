@@ -68,7 +68,6 @@ class MyZshManager:
         self.bin_dir = Path(self.myzsh_dir) / 'bin'
         self.lib_dir = Path(self.myzsh_dir) / 'lib'  # 修正为 lib
         self.start_dir = Path(self.myzsh_dir) / 'start'
-        self.lib_dir = Path(self.myzsh_dir) / 'lib'
         
         self._ensure_dirs()
         
@@ -551,7 +550,7 @@ class MyZshManager:
             print(Colors.green("仓库克隆成功"))
             
             # 需要更新的目录列表
-            dirs_to_update = ['bin', 'lib', 'start', 'lib']
+            dirs_to_update = ['bin', 'lib', 'start']
             
             print("正在更新目录...")
             updated_dirs = []
