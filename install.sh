@@ -4,20 +4,21 @@ set -euo pipefail
 # ===== 颜色定义 =====
 readonly RED='\033[31m'
 readonly GREEN='\033[32m'
+readonly YELLOW='\033[33m'
 readonly BLUE='\033[94m'
 readonly RESET='\033[0m'
 
 # ===== 标准日志函数 =====
 log_info() {
-    echo -e "[${GREEN}信息${RESET}] $*"
+    printf "[${GREEN}信息${RESET}] %s\n" "$*"
 }
 
 log_warn() {
-    echo -e "[${BLUE}警告${RESET}] $*" >&2
+    printf "[${YELLOW}警告${RESET}] %s\n" "$*" >&2
 }
 
 log_error() {
-    echo -e "[${RED}错误${RESET}] $*" >&2
+    printf "[${RED}错误${RESET}] %s\n" "$*" >&2
 }
 
 # ===== 错误退出函数 =====
@@ -27,7 +28,7 @@ die() {
 }
 
 # ===== 环境变量 =====
-env() {
+setup_env() {
     OMZ_REPO="${MYZSH_REPO:-https://github.com/ohmyzsh/ohmyzsh}"
     MYZSH_REPO="${MYZSH_REPO:-https://github.com/mcmineleng/myzsh}"
     MYZSH_DIR="${MYZSH_DIR:-$HOME/.myzsh}"
@@ -37,11 +38,15 @@ env() {
 
 # ===== 交互式配置 =====
 cli() {
-    read -p "\033[94mMyZsh仓库地址(回车默认): \033[0m" MYZSH_REPO
-    read -p "\033[94mOh-My-Zsh仓库地址: \033[0m" OMZ_REPO
-    read -p "\033[94m安装目录(默认\033[32m~/.myzsh\033[94m): \033[0m" MYZSH_DIR
+    printf "\033[94mMyZsh仓库地址(回车默认): \033[0m"
+    read -r MYZSH_REPO
+    printf "\033[94mOh-My-Zsh仓库地址: \033[0m"
+    read -r OMZ_REPO
+    printf "\033[94m安装目录(默认\033[32m~/.myzsh\033[94m): \033[0m"
+    read -r MYZSH_DIR
     
-    read -p "安装Oh-My-Zsh自带主题 [\033[32mY\033[94m/\033[31mn\033[94m] \033[0m" omz_install_themes
+    printf "安装Oh-My-Zsh自带主题 [\033[32mY\033[94m/\033[31mn\033[94m] \033[0m"
+    read -r omz_install_themes
     omz_install_themes=${omz_install_themes:-Y}
     if [[ "$omz_install_themes" =~ ^[Yy]$ ]]; then
         OMZ_THEMES_INSTALL=true
@@ -49,7 +54,8 @@ cli() {
         OMZ_THEMES_INSTALL=false
     fi
 
-    read -p "\033[94m安装Oh-My-Zsh自带插件 [\033[32mY\033[94m/\033[31mn\033[94m] \033[0m" omz_install_plugins
+    printf "\033[94m安装Oh-My-Zsh自带插件 [\033[32mY\033[94m/\033[31mn\033[94m] \033[0m"
+    read -r omz_install_plugins
     omz_install_plugins=${omz_install_plugins:-Y}
     if [[ "$omz_install_plugins" =~ ^[Yy]$ ]]; then
         OMZ_PLUGINS_INSTALL=true
@@ -67,9 +73,9 @@ myzsh_install() {
     git clone --depth 1 "$MYZSH_REPO" "$MYZSH_DIR" || die "克隆 MyZsh 仓库失败"
     log_info "克隆 MyZsh 仓库成功"
     log_info "正在授予myzsh执行权限"
-    chmod +x  $MYZSH_DIR/bin/myzsh || die "授予执行权限失败"
+    chmod +x  "$MYZSH_DIR/bin/myzsh" || die "授予执行权限失败"
     log_info "正在授予myzshpack执行权限"
-    chmod +x  $MYZSH_DIR/bin/myzshpack || die "授予执行权限失败"
+    chmod +x  "$MYZSH_DIR/bin/myzshpack" || die "授予执行权限失败"
 }
 
 # ===== 克隆 Oh-My-Zsh =====
@@ -142,7 +148,7 @@ main() {
         cli
     fi
     
-    env
+    setup_env
     myzsh_install
     
     if [[ "$OMZ_THEMES_INSTALL" == "true" ]] || [[ "$OMZ_PLUGINS_INSTALL" == "true" ]]; then
@@ -160,10 +166,10 @@ main() {
     write_zshrc
     temp_clear
     
-    echo ""
+    printf "\n"
     log_info "安装完成！请使用以下命令重启 Zsh："
-    echo "  exec zsh"
-    echo "  或重新打开终端"
+    printf "  exec zsh\n"
+    printf "  或重新打开终端\n"
 }
 
 main "$@"
