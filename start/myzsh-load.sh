@@ -1,6 +1,6 @@
 source "$MYZSH_DIR/config/myzsh/env"
-fpath+=($MYZSH_DIR/lib $MYZSH_DIR/bin)
-autoload -Uz myzsh
+export PATH=$HOME/.myzsh/bin:$PATH
+fpath+=($MYZSH_DIR/lib)
 source "$MYZSH_DIR/config/myzsh/language"
 source "$MYZSH_DIR/config/myzsh/HISTFILE"
 source "$MYZSH_DIR/start/history.sh"
