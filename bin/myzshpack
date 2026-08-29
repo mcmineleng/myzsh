@@ -128,6 +128,40 @@ REPO_BASE=https://github.com/
         
         return env_vars
     
+    def _get_env_for_item(self, repo_name: str, index_url: str) -> Dict[str, str]:
+        """
+        获取安装包时需要的环境变量
+        优先级: index.env < env文件 < 预设变量
+        """
+        # 1. 从缓存获取索引的 env（原始保存，不做任何处理）
+        cache_data = self._load_cache()
+        repo_data = cache_data.get(repo_name, {})
+        index_env = repo_data.get('env', {})  # 直接取原始数据
+        
+        # 2. 从本地 env 文件加载
+        local_env = self._load_env_for_repo(repo_name)
+        
+        # 3. 预设变量
+        repo_config = self._load_packages_repo()
+        for repo in repo_config.get('repo', []):
+            if repo.get('name') == repo_name:
+                index_url = repo.get('index', '')
+                break
+        
+        parsed_url = urlparse(index_url)
+        preset_vars = {
+            'INDEX_BASE_URL': index_url,
+            'INDEX_DOMAIN': f"{parsed_url.scheme}://{parsed_url.netloc}" if parsed_url.scheme else parsed_url.netloc
+        }
+        
+        # 4. 合并变量
+        merged_vars = {}
+        merged_vars.update(index_env)      # index.env (最低)
+        merged_vars.update(local_env)      # env文件
+        merged_vars.update(preset_vars)    # 预设变量 (最高)
+        
+        return merged_vars
+    
     def _resolve_variables(self, text: str, variables: Dict[str, str]) -> str:
         """解析字符串中的变量 ${VAR}"""
         def replace_var(match):
