@@ -1,3 +1,2 @@
-for file in $MYZSH_DIR/function/*; do
-    source "$file"
-done
+fpath=($MYZSH_DIR/functions $fpath)
+autoload -Uz $MYZSH_DIR/functions/*(:t)
