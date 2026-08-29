@@ -13,6 +13,9 @@ import readline
 import termios
 import tty
 import signal
+import tempfile
+import shutil
+import stat
 
 # 颜色定义
 class Colors:
@@ -59,6 +62,12 @@ class MyZshManager:
         self.theme_file = self.config_myzsh_dir / 'theme'
         self.theme_config_file = self.config_myzsh_dir / 'theme_config'
         self.plugins_file = self.config_myzsh_dir / 'plugins'
+        
+        # 核心目录（用于更新）
+        self.bin_dir = Path(self.myzsh_dir) / 'bin'
+        self.function_dir = Path(self.myzsh_dir) / 'function'
+        self.start_dir = Path(self.myzsh_dir) / 'start'
+        self.lib_dir = Path(self.myzsh_dir) / 'lib'
         
         self._ensure_dirs()
         
@@ -455,6 +464,111 @@ class MyZshManager:
         print(f"使用编辑器: {editor_cmd}")
         subprocess.run([editor_cmd, str(full_path)])
     
+    def _copy_dir_contents(self, src_dir: Path, dst_dir: Path, preserve_perms: bool = True) -> None:
+        """
+        复制目录内容，覆盖已有文件，保留权限
+        
+        Args:
+            src_dir: 源目录
+            dst_dir: 目标目录
+            preserve_perms: 是否保留文件权限
+        """
+        if not src_dir.exists():
+            return
+        
+        # 确保目标目录存在
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        
+        for src_item in src_dir.iterdir():
+            dst_item = dst_dir / src_item.name
+            
+            if src_item.is_dir():
+                # 递归复制子目录
+                self._copy_dir_contents(src_item, dst_item, preserve_perms)
+            else:
+                # 复制文件并保留权限
+                if preserve_perms:
+                    shutil.copy2(src_item, dst_item)
+                else:
+                    shutil.copy(src_item, dst_item)
+    
+    def _update_core(self) -> None:
+        """
+        更新核心文件，使用 MYZSH_REPO 环境变量
+        """
+        print(Colors.cyan("正在更新 myzsh 核心文件..."))
+        
+        # 从环境变量获取仓库 URL
+        repo_url = os.environ.get('MYZSH_REPO', 'https://github.com/mcmineleng/myzsh')
+        
+        print(Colors.yellow(f"使用仓库: {repo_url}"))
+        print("提示: 可通过设置 MYZSH_REPO 环境变量来使用自定义仓库")
+        print("例如: export MYZSH_REPO=https://github.com/yourusername/myzsh.git")
+        print()
+        
+        # 创建临时目录
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            repo_path = temp_path / 'myzsh'
+            
+            print(f"正在克隆仓库...")
+            try:
+                subprocess.run(
+                    ['git', 'clone', '--depth', '1', repo_url, str(repo_path)],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+            except subprocess.CalledProcessError as e:
+                print(Colors.red(f"克隆仓库失败: {e.stderr}"))
+                return False
+            except Exception as e:
+                print(Colors.red(f"克隆仓库失败: {e}"))
+                return False
+            
+            print(Colors.green("仓库克隆成功"))
+            
+            # 需要更新的目录列表
+            dirs_to_update = ['bin', 'function', 'start', 'lib']
+            
+            print("正在更新目录...")
+            updated_dirs = []
+            skipped_dirs = []
+            
+            for dir_name in dirs_to_update:
+                src_dir = repo_path / dir_name
+                dst_dir = Path(self.myzsh_dir) / dir_name
+                
+                if src_dir.exists() and src_dir.is_dir():
+                    print(f"  更新 {dir_name}/ ...")
+                    self._copy_dir_contents(src_dir, dst_dir, preserve_perms=True)
+                    print(f"  {Colors.green('✓')} {dir_name}/ 已更新")
+                    updated_dirs.append(dir_name)
+                else:
+                    print(f"  {Colors.yellow('⚠')} {dir_name}/ 不存在于仓库中，跳过")
+                    skipped_dirs.append(dir_name)
+            
+            print(Colors.green("\n更新完成！"))
+            
+            if updated_dirs:
+                print(f"已更新目录: {', '.join(updated_dirs)}")
+            
+            if skipped_dirs:
+                print(Colors.yellow(f"跳过的目录: {', '.join(skipped_dirs)}"))
+            
+            # 验证关键目录是否存在
+            missing_dirs = []
+            for dir_name in dirs_to_update:
+                dir_path = Path(self.myzsh_dir) / dir_name
+                if not dir_path.exists():
+                    missing_dirs.append(dir_name)
+            
+            if missing_dirs:
+                print(Colors.yellow(f"\n提示: 以下目录在更新后仍不存在: {', '.join(missing_dirs)}"))
+                print("这是正常的，如果仓库中不包含这些目录的话。")
+            
+            return True
+    
     def _show_help(self) -> None:
         """显示帮助信息"""
         program_name = os.path.basename(sys.argv[0])
@@ -471,9 +585,15 @@ class MyZshManager:
     plugin list [true|on|enable] 列出插件（默认列出所有已安装的插件）
     edit <路径>                 编辑配置文件（路径相对于 {self.config_dir}/）
     edit set <编辑器命令>       设置默认编辑器
+    update                      更新 myzsh 核心文件（bin, function, start, lib）
     help                        显示此帮助信息
 
 注意：安装主题和插件请使用 myzshpack 命令
+
+环境变量:
+    MYZSH_DIR    - myzsh 安装目录（默认: ~/.myzsh）
+    MYZSH_REPO   - 更新时使用的仓库 URL（默认: https://github.com/mcmineleng/myzsh）
+    EDITOR       - 默认编辑器（默认: vi）
 
 交互式插件管理:
     上下键: 移动选择
@@ -491,6 +611,11 @@ class MyZshManager:
     {program_name} edit myzsh/edit           # 编辑编辑器设置
     {program_name} edit custom/my.conf       # 编辑自定义配置文件
 
+更新命令示例:
+    {program_name} update                     # 使用默认或 MYZSH_REPO 指定的仓库更新
+    export MYZSH_REPO=https://github.com/user/myzsh.git  # 设置自定义仓库
+    {program_name} update                     # 使用自定义仓库更新
+
 示例:
     {program_name} theme set mytheme
     {program_name} theme config /path/to/theme.config
@@ -504,6 +629,7 @@ class MyZshManager:
     {program_name} edit myzsh/theme
     {program_name} edit set vim
     {program_name} edit set /usr/bin/nano
+    {program_name} update                     # 更新核心文件
 """
         print(help_text)
     
@@ -588,12 +714,15 @@ class MyZshManager:
             else:
                 self._edit_config(subcmd)
         
+        elif cmd == 'update':
+            self._update_core()
+        
         elif cmd in ('help', '--help', '-h'):
             self._show_help()
         
         else:
             print(Colors.red(f"错误: 未知命令 '{cmd}'"))
-            print("可用命令: theme, plugin, edit, help")
+            print("可用命令: theme, plugin, edit, update, help")
             self._show_help()
             return 1
         
