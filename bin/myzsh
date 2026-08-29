@@ -60,8 +60,8 @@ class MyZshManager:
         self.config_dir = Path(self.myzsh_dir) / 'config'
         self.config_myzsh_dir = self.config_dir / 'myzsh'
         self.editor_file = self.config_myzsh_dir / 'edit'
-        self.theme_file = self.config_myzsh_dir / 'theme'
-        self.theme_config_file = self.config_myzsh_dir / 'theme_config'
+        self.theme_file = self.config_myzsh_dir / 'ZSH_THEME'
+        self.theme_config_file = self.config_myzsh_dir / 'ZSH_THEME_CONFIG'
         self.plugins_file = self.config_myzsh_dir / 'plugins'
         
         # 核心目录（用于更新）

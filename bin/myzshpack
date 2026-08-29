@@ -59,7 +59,7 @@ class MyZshPackManager:
         # 所有配置都迁移到 myzshpack 目录
         self.config_dir = Path(self.myzsh_dir) / 'config'
         self.myzshpack_config_dir = self.config_dir / 'myzshpack'
-        self.cache_file = self.myzshpack_config_dir / '_cache.json'  # 改为缓存文件
+        self.cache_file = self.myzshpack_config_dir / '_cache.json'
         self.packages_repo_file = self.myzshpack_config_dir / 'packages_repo.json'
         self.env_file = self.myzshpack_config_dir / 'env'
         self.themes_dir = Path(self.myzsh_dir) / 'themes'
@@ -75,7 +75,7 @@ class MyZshPackManager:
             default_repo = {
                 "repo": [
                     {
-                        "name": "default",
+                        "name": "awesome-zsh-plugins",
                         "index": "https://raw.github.com/mcmineleng/myzsh-package/main/index.json"
                     }
                 ]
@@ -85,31 +85,20 @@ class MyZshPackManager:
         # 如果env文件不存在，创建示例
         if not self.env_file.exists():
             example_env = """# myzshpack 环境变量配置
-# 优先级（从低到高）:
-# [default] < [global] < [仓库名] < 预设变量
+# 用于在安装时动态替换 ${VAR} 变量
 
 [default]
-# 最低优先级，所有其他地方都找不到时才使用
-# REPO_BASE=https://github.com
-
-[global]
-# 全局配置（覆盖 index.json 的 env）
-# REPO_BASE=https://github.com
+# 默认变量
+REPO_BASE=https://github.com/
 
 [仓库名]
-# 仓库特定配置（覆盖 global）
-# REPO_BASE=https://gitee.com
+# 仓库特定变量，覆盖 default
+# REPO_BASE=https://gitee.com/
 """
             self.env_file.write_text(example_env)
     
-    def _load_env_config(self, repo_name: str = None, load_default: bool = True) -> Dict[str, str]:
-        """
-        加载环境变量配置
-        优先级（从低到高）:
-        1. [default] - 最低优先级
-        2. [global]
-        3. [仓库名] - 最高优先级
-        """
+    def _load_env_for_repo(self, repo_name: str = None) -> Dict[str, str]:
+        """加载环境变量配置"""
         env_vars = {}
         
         if not self.env_file.exists():
@@ -119,17 +108,10 @@ class MyZshPackManager:
             config = configparser.ConfigParser()
             config.read(self.env_file)
             
-            # 先加载 default（最低优先级）
-            if load_default and config.has_section('default'):
+            if config.has_section('default'):
                 for key, value in config.items('default'):
                     env_vars[key] = value
             
-            # 再加载 global（覆盖 default）
-            if config.has_section('global'):
-                for key, value in config.items('global'):
-                    env_vars[key] = value
-            
-            # 最后加载仓库特定配置（最高优先级，覆盖 global）
             if repo_name and config.has_section(repo_name):
                 for key, value in config.items(repo_name):
                     env_vars[key] = value
@@ -142,20 +124,11 @@ class MyZshPackManager:
         """解析字符串中的变量 ${VAR}"""
         def replace_var(match):
             var_name = match.group(1)
-            # 如果变量不存在，保留原样
             return variables.get(var_name, match.group(0))
         
-        # 使用正则替换 ${VAR} 格式的变量
         pattern = r'\$\{([^}]+)\}'
         result = re.sub(pattern, replace_var, text)
         return result
-    
-    def _resolve_item_url(self, item: Dict, variables: Dict[str, str]) -> str:
-        """解析 item 的 URL，替换变量"""
-        url = item.get('url', '')
-        if url:
-            return self._resolve_variables(url, variables)
-        return url
     
     def _load_packages_repo(self) -> Dict[str, Any]:
         """加载包仓库配置"""
@@ -185,13 +158,15 @@ class MyZshPackManager:
         """保存缓存文件"""
         self.cache_file.write_text(json.dumps(cache_data, indent=2))
     
-    def _fetch_index_from_url(self, url: str) -> Optional[Dict[str, Any]]:
-        """从URL获取索引数据"""
+    def _fetch_index_raw(self, url: str) -> Optional[Dict[str, Any]]:
+        """从URL获取索引数据 - 直接二进制读取，然后JSON解析"""
         try:
             print(f"正在从 {url} 获取索引...")
             with urllib.request.urlopen(url, timeout=10) as response:
-                data = response.read().decode('utf-8')
-                return json.loads(data)
+                # 直接读取原始内容，不解析
+                raw_content = response.read().decode('utf-8')
+                # 解析为 JSON 对象
+                return json.loads(raw_content)
         except urllib.error.URLError as e:
             print(Colors.red(f"网络错误: {e}"))
             return None
@@ -202,64 +177,8 @@ class MyZshPackManager:
             print(Colors.red(f"获取索引失败: {e}"))
             return None
     
-    def _resolve_index_variables(self, index_data: Dict[str, Any], repo_name: str, index_url: str) -> Dict[str, Any]:
-        """解析索引中的所有变量"""
-        # 1. 从索引中提取 env
-        index_env = {}
-        if 'env' in index_data and isinstance(index_data['env'], list):
-            for env_item in index_data['env']:
-                if isinstance(env_item, dict):
-                    for key, value in env_item.items():
-                        index_env[key] = value
-        
-        # 2. 加载本地环境变量
-        default_env = self._load_env_config(None, load_default=True)
-        local_env = self._load_env_config(repo_name, load_default=False)
-        
-        # 3. 预设变量
-        parsed_url = urlparse(index_url)
-        preset_vars = {
-            'INDEX_BASE_URL': index_url,
-            'INDEX_DOMAIN': f"{parsed_url.scheme}://{parsed_url.netloc}" if parsed_url.scheme else parsed_url.netloc
-        }
-        
-        # 4. 合并变量（优先级从低到高）
-        merged_vars = {}
-        merged_vars.update(default_env)   # default (最低)
-        merged_vars.update(index_env)     # index env (覆盖 default)
-        merged_vars.update(local_env)     # global + repo (覆盖 index_env)
-        merged_vars.update(preset_vars)   # preset (最高)
-        
-        # 5. 创建解析后的索引副本
-        resolved_index = {
-            "env": index_env,  # 保留原始 env
-            "themes": [],
-            "plugins": []
-        }
-        
-        # 6. 解析主题
-        for theme in index_data.get('themes', []):
-            resolved_theme = theme.copy()
-            if 'url' in resolved_theme:
-                resolved_theme['url'] = self._resolve_variables(resolved_theme['url'], merged_vars)
-            resolved_index['themes'].append(resolved_theme)
-        
-        # 7. 解析插件
-        for plugin in index_data.get('plugins', []):
-            resolved_plugin = plugin.copy()
-            if 'url' in resolved_plugin:
-                resolved_plugin['url'] = self._resolve_variables(resolved_plugin['url'], merged_vars)
-            resolved_index['plugins'].append(resolved_plugin)
-        
-        # 打印调试信息
-        print(f"  变量: {list(merged_vars.keys())}")
-        if 'REPO_BASE' in merged_vars:
-            print(f"  REPO_BASE = {merged_vars['REPO_BASE']}")
-        
-        return resolved_index
-    
     def update(self) -> None:
-        """更新缓存"""
+        """更新缓存 - 直接保存原始索引内容，不处理"""
         repo_config = self._load_packages_repo()
         repos = repo_config.get('repo', [])
         
@@ -283,22 +202,27 @@ class MyZshPackManager:
             print(f"处理仓库: {repo_name}")
             print(Colors.cyan('=' * 50))
             
-            # 获取索引数据
-            index_data = self._fetch_index_from_url(index_url)
+            # 获取索引数据 - 直接二进制读取
+            index_data = self._fetch_index_raw(index_url)
             if not index_data:
                 print(Colors.red(f"仓库 {repo_name} 索引获取失败，跳过"))
                 continue
             
-            # 解析变量
-            resolved_index = self._resolve_index_variables(index_data, repo_name, index_url)
-            
-            # 保存到缓存
-            cache_data[repo_name] = resolved_index
+            # 直接保存原始内容到缓存，不做任何处理
+            cache_data[repo_name] = index_data
             
             # 统计信息
-            themes_count = len(resolved_index.get('themes', []))
-            plugins_count = len(resolved_index.get('plugins', []))
+            themes_count = len(index_data.get('themes', []))
+            plugins_count = len(index_data.get('plugins', []))
+            env_data = index_data.get('env', {})
+            env_count = len(env_data) if isinstance(env_data, dict) else 0
+            
             print(Colors.green(f"仓库 {repo_name} 缓存完成"))
+            print(f"  环境变量: {env_count} 个")
+            if env_count > 0:
+                print(f"    {env_data}")
+            else:
+                print(f"    警告: env 为空!")
             print(f"  主题: {themes_count} 个")
             print(f"  插件: {plugins_count} 个")
         
@@ -317,21 +241,50 @@ class MyZshPackManager:
         print(f"  插件: {total_plugins} 个")
         print(Colors.cyan('=' * 50))
     
+    def _get_env_for_item(self, repo_name: str, index_url: str) -> Dict[str, str]:
+        """
+        获取安装包时需要的环境变量
+        优先级: index.env < env文件 < 预设变量
+        """
+        # 1. 从缓存获取索引的 env（原始保存，不做任何处理）
+        cache_data = self._load_cache()
+        repo_data = cache_data.get(repo_name, {})
+        index_env = repo_data.get('env', {})  # 直接取原始数据
+        
+        # 2. 从本地 env 文件加载
+        local_env = self._load_env_for_repo(repo_name)
+        
+        # 3. 预设变量
+        repo_config = self._load_packages_repo()
+        for repo in repo_config.get('repo', []):
+            if repo.get('name') == repo_name:
+                index_url = repo.get('index', '')
+                break
+        
+        parsed_url = urlparse(index_url)
+        preset_vars = {
+            'INDEX_BASE_URL': index_url,
+            'INDEX_DOMAIN': f"{parsed_url.scheme}://{parsed_url.netloc}" if parsed_url.scheme else parsed_url.netloc
+        }
+        
+        # 4. 合并变量
+        merged_vars = {}
+        merged_vars.update(index_env)      # index.env (最低)
+        merged_vars.update(local_env)      # env文件
+        merged_vars.update(preset_vars)    # 预设变量 (最高)
+        
+        return merged_vars
+    
     def _find_in_cache(self, item_id: str) -> List[Tuple[str, str, Dict[str, Any]]]:
-        """
-        在缓存中查找包
-        返回: [(仓库名, 类型('theme'/'plugin'), 包数据), ...]
-        """
+        """在缓存中查找包"""
         cache_data = self._load_cache()
         results = []
         
         for repo_name, repo_data in cache_data.items():
-            # 查找主题
             for theme in repo_data.get('themes', []):
                 if theme.get('id') == item_id:
                     results.append((repo_name, 'theme', theme))
             
-            # 查找插件
             for plugin in repo_data.get('plugins', []):
                 if plugin.get('id') == item_id:
                     results.append((repo_name, 'plugin', plugin))
@@ -339,7 +292,7 @@ class MyZshPackManager:
         return results
     
     def _clone_repo(self, repo_url: str, target_dir: Path) -> None:
-        """克隆仓库（仅最新版本）"""
+        """克隆仓库"""
         repo_name = Path(repo_url).stem
         target_path = target_dir / repo_name
         
@@ -430,7 +383,6 @@ class MyZshPackManager:
                 print(Colors.red("解压后没有内容"))
                 return
             
-            # 主题和插件使用相同的逻辑：创建以 item_id 命名的文件夹
             target_path = target_dir / item_id
             if target_path.exists():
                 shutil.rmtree(target_path)
@@ -446,16 +398,12 @@ class MyZshPackManager:
     
     def _install_file(self, url: str, target_dir: Path, item_id: str, item_type: str = 'plugin') -> None:
         """安装单文件"""
-        # 根据 URL 获取文件名
         filename = Path(url).name
         if not filename:
-            # 如果 URL 没有文件名，使用 item_id
             filename = item_id
         
-        # 主题：直接放在 themes 目录，不创建子文件夹
         if item_type == 'theme':
             target_path = target_dir / filename
-            # 如果文件已存在，询问是否覆盖
             if target_path.exists():
                 print(Colors.yellow(f"文件已存在: {target_path}"))
                 response = input("是否覆盖? (y/N): ").strip().lower()
@@ -470,7 +418,6 @@ class MyZshPackManager:
                 print(Colors.red(f"主题文件 {item_id} 安装失败"))
             return
         
-        # 插件：创建以 item_id 命名的文件夹
         target_path = target_dir / item_id
         if target_path.exists():
             print(Colors.yellow(f"目录已存在: {target_path}"))
@@ -482,13 +429,11 @@ class MyZshPackManager:
         
         target_path.mkdir(parents=True, exist_ok=True)
         
-        # 下载文件到目标文件夹
         file_path = target_path / filename
         if self._download_file(url, file_path):
             print(Colors.green(f"插件 {item_id} 安装成功!"))
             print(f"  文件: {file_path}")
         else:
-            # 如果下载失败，删除空文件夹
             shutil.rmtree(target_path)
             print(Colors.red(f"插件 {item_id} 安装失败"))
     
@@ -512,12 +457,27 @@ class MyZshPackManager:
     
     def _install_from_repo(self, item_id: str, item_type: str, item_data: Dict, repo_name: str) -> None:
         """从仓库安装主题或插件"""
-        url = item_data.get('url')
-        archive_type = item_data.get('type', 'git')
-        
-        if not url:
+        raw_url = item_data.get('url', '')
+        if not raw_url:
             print(Colors.red(f"错误: {item_id} 没有URL"))
             return
+        
+        # 获取仓库的索引 URL
+        repo_config = self._load_packages_repo()
+        index_url = ''
+        for repo in repo_config.get('repo', []):
+            if repo.get('name') == repo_name:
+                index_url = repo.get('index', '')
+                break
+        
+        # 获取环境变量并解析 URL
+        env_vars = self._get_env_for_item(repo_name, index_url)
+        url = self._resolve_variables(raw_url, env_vars)
+        
+        if raw_url != url:
+            print(f"  解析 URL: {raw_url} -> {url}")
+        
+        archive_type = item_data.get('type', 'git')
         
         if item_type == 'theme':
             target_dir = self.themes_dir
@@ -526,9 +486,7 @@ class MyZshPackManager:
             target_dir = self.plugins_dir
             item_label = "插件"
         
-        # 主题的 file 类型特殊处理：直接放在 themes 目录
         if item_type == 'theme' and archive_type == 'file':
-            # 检查文件是否存在
             filename = Path(url).name
             if not filename:
                 filename = item_id
@@ -542,7 +500,6 @@ class MyZshPackManager:
             self._install_file(url, target_dir, item_id, item_type)
             return
         
-        # 其他类型：创建子文件夹
         target_path = target_dir / item_id
         
         if target_path.exists():
@@ -572,12 +529,10 @@ class MyZshPackManager:
             print(Colors.red("错误: 请指定要安装的名称或URL"))
             return
         
-        # 如果是 install theme/plugin 且只传了一个参数，但那个参数是类型名
         if target_type and len(items) == 1 and items[0] in ['theme', 'plugin']:
             print(Colors.red(f"错误: 请指定要安装的{items[0]}名称或URL"))
             return
         
-        # 遍历所有要安装的项目
         success_count = 0
         fail_count = 0
         
@@ -617,7 +572,6 @@ class MyZshPackManager:
                     success_count += 1
                 else:
                     self._install_manual(target_type, item_name, item, archive_type)
-                    # 简单判断是否成功
                     if target_type == 'theme':
                         if (self.themes_dir / item_name).exists():
                             success_count += 1
@@ -630,7 +584,7 @@ class MyZshPackManager:
                             fail_count += 1
                 continue
             
-            # 从仓库安装 - 在缓存中查找
+            # 从缓存查找
             results = self._find_in_cache(item)
             
             if not results:
@@ -639,7 +593,6 @@ class MyZshPackManager:
                 fail_count += 1
                 continue
             
-            # 如果指定了类型，过滤结果
             if target_type:
                 results = [(r, t, d) for r, t, d in results if t == target_type]
                 if not results:
@@ -647,7 +600,6 @@ class MyZshPackManager:
                     fail_count += 1
                     continue
             
-            # 如果只有一个结果，直接安装
             if len(results) == 1:
                 repo_name, pkg_type, pkg_data = results[0]
                 print(f"找到{pkg_type}: {item} (仓库: {repo_name})")
@@ -655,7 +607,6 @@ class MyZshPackManager:
                 success_count += 1
                 continue
             
-            # 多个结果，让用户选择
             print(f"找到 {len(results)} 个匹配:")
             for idx, (repo_name, pkg_type, _) in enumerate(results, 1):
                 print(f"  {idx}. {pkg_type} (仓库: {repo_name})")
@@ -679,7 +630,6 @@ class MyZshPackManager:
                 print(Colors.red(f"无效选择: {choice}"))
                 fail_count += 1
         
-        # 显示汇总信息
         print(f"\n{Colors.cyan('=' * 50)}")
         print(f"安装完成: {Colors.green(f'成功 {success_count}')} 个, {Colors.red(f'失败 {fail_count}')} 个")
         print(Colors.cyan('=' * 50))
@@ -690,7 +640,6 @@ class MyZshPackManager:
             print(Colors.red("错误: 请指定要移除的名称"))
             return
         
-        # 检查是否是指定类型
         if target_type:
             if target_type == 'theme':
                 target_dir = self.themes_dir
@@ -702,14 +651,9 @@ class MyZshPackManager:
                 print(Colors.red(f"错误: 未知类型 '{target_type}'，请使用 'theme' 或 'plugin'"))
                 return
             
-            # 对于主题，检查文件或目录
             if target_type == 'theme':
-                # 检查是否是目录
                 target_path = target_dir / name
                 if not target_path.exists():
-                    # 检查是否是文件
-                    target_path = target_dir / name
-                    # 尝试添加常见扩展名
                     extensions = ['.zsh-theme', '.zsh', '.sh']
                     found = False
                     for ext in extensions:
@@ -722,7 +666,6 @@ class MyZshPackManager:
                         print(Colors.yellow(f"{item_label} {name} 未安装"))
                         return
                 else:
-                    # 检查目录下是否有主题文件
                     has_theme = False
                     for ext in ['.zsh-theme', '.zsh', '.sh']:
                         if list(target_path.glob(f"*{ext}")):
@@ -749,12 +692,10 @@ class MyZshPackManager:
                 print("取消移除")
             return
         
-        # 没有指定类型，检查是否存在
-        # 检查主题
+        # 没有指定类型
         theme_path = self.themes_dir / name
         theme_exists = theme_path.exists()
         if not theme_exists:
-            # 检查是否是文件
             extensions = ['.zsh-theme', '.zsh', '.sh']
             for ext in extensions:
                 file_path = self.themes_dir / f"{name}{ext}"
@@ -845,7 +786,6 @@ class MyZshPackManager:
         
         print(Colors.cyan(f"搜索结果: '{query}' ({len(results)} 个结果)"))
         
-        # 按类型分组显示
         themes = [(r, d) for r, t, d in results if t == 'theme']
         plugins = [(r, d) for r, t, d in results if t == 'plugin']
         
@@ -872,7 +812,7 @@ class MyZshPackManager:
         print(f"\n总计: {len(themes)} 个主题, {len(plugins)} 个插件 (来自 {len(set(r for r, _, _ in results))} 个仓库)")
     
     def list_packages(self, filter_type: Optional[str] = None) -> None:
-        """列出所有可用的包，可选过滤类型"""
+        """列出所有可用的包"""
         cache_data = self._load_cache()
         
         if not cache_data:
@@ -910,7 +850,6 @@ class MyZshPackManager:
         
         print(Colors.cyan(title))
         
-        # 按仓库分组显示
         current_repo = None
         for repo_name, item_type, item_data in items_to_show:
             if repo_name != current_repo:
@@ -925,7 +864,6 @@ class MyZshPackManager:
             if 'description' in item_data:
                 print(f"    {item_data['description']}")
         
-        # 统计
         total_themes = sum(1 for _, t, _ in items_to_show if t == 'theme')
         total_plugins = sum(1 for _, t, _ in items_to_show if t == 'plugin')
         total_repos = len(set(r for r, _, _ in items_to_show))
@@ -939,13 +877,10 @@ class MyZshPackManager:
         """列出已安装的主题和插件"""
         print(Colors.cyan("已安装的包:"))
         
-        # 列出主题（包括文件和目录）
         if self.themes_dir.exists():
             themes = []
-            # 检查目录
             for item in self.themes_dir.iterdir():
                 if item.is_dir():
-                    # 检查是否是主题目录（包含 .zsh-theme 文件）
                     has_theme = False
                     for ext in ['.zsh-theme', '.zsh', '.sh']:
                         if list(item.glob(f"*{ext}")):
@@ -968,7 +903,6 @@ class MyZshPackManager:
         else:
             print(f"\n{Colors.yellow('主题:')} (无)")
         
-        # 列出插件
         if self.plugins_dir.exists():
             plugins = [d for d in self.plugins_dir.iterdir() if d.is_dir()]
             if plugins:
@@ -980,6 +914,30 @@ class MyZshPackManager:
         else:
             print(f"\n{Colors.yellow('插件:')} (无)")
     
+    def show_cache(self) -> None:
+        """显示缓存内容（调试用）"""
+        cache_data = self._load_cache()
+        if not cache_data:
+            print(Colors.yellow("缓存为空"))
+            return
+        
+        print(Colors.cyan("缓存内容:"))
+        for repo_name, repo_data in cache_data.items():
+            print(f"\n{Colors.blue(f'仓库: {repo_name}')}")
+            env = repo_data.get('env', {})
+            print(f"  env 类型: {type(env)}")
+            print(f"  env 内容: {env}")
+            themes = repo_data.get('themes', [])
+            print(f"  主题数: {len(themes)}")
+            if themes:
+                for theme in themes[:3]:
+                    print(f"    - {theme.get('id')}: {theme.get('url')}")
+            plugins = repo_data.get('plugins', [])
+            print(f"  插件数: {len(plugins)}")
+            if plugins:
+                for plugin in plugins[:3]:
+                    print(f"    - {plugin.get('id')}: {plugin.get('url')}")
+    
     def _show_help(self) -> None:
         """显示帮助信息"""
         program_name = os.path.basename(sys.argv[0])
@@ -987,18 +945,13 @@ class MyZshPackManager:
 用法: {program_name} <命令> [参数]
 
 命令:
-    update              更新包缓存（从所有配置的仓库获取）
+    update              更新包缓存（直接保存远程索引内容）
     install <名称>...   从缓存安装一个或多个主题或插件
-                          - 如果只有一个匹配，直接安装
-                          - 如果有多个匹配，会询问选择哪个仓库
-                          - 支持同时安装多个，用空格分隔
-    install theme <名称>... 从缓存安装一个或多个指定的主题
-    install plugin <名称>... 从缓存安装一个或多个指定的插件
-    install theme <URL>... [类型]  手动安装一个或多个主题
-    install plugin <URL>... [类型]  手动安装一个或多个插件
+    install theme <名称>...  安装指定的主题
+    install plugin <名称>... 安装指定的插件
+    install theme <URL>...   手动安装主题
+    install plugin <URL>...  手动安装插件
     remove <名称>       移除主题或插件
-                          - 如果只有一个匹配，直接移除
-                          - 如果主题和插件都有同名，会询问
     remove theme <名称>  移除指定的主题
     remove plugin <名称>  移除指定的插件
     search <关键词>     搜索主题或插件
@@ -1006,85 +959,25 @@ class MyZshPackManager:
     list theme          只列出所有可用的主题
     list plugin         只列出所有可用的插件
     list installed      列出已安装的主题和插件
+    show-cache          显示缓存内容（调试用）
     help                显示此帮助信息
-
-包类型说明:
-    git       - Git 仓库（默认）
-    zip       - ZIP 压缩包
-    tar.gz    - tar.gz 压缩包
-    file      - 单文件（主题直接放在 themes 目录，插件放在子文件夹中）
 
 配置文件:
     {self.packages_repo_file}  - 包仓库配置
-    {self.cache_file}          - 本地包缓存（每个仓库独立保存）
-    {self.env_file}            - 环境变量配置
-
-缓存文件结构:
-    {{
-      "仓库名1": {{
-        "env": {{...}},
-        "themes": [...],
-        "plugins": [...]
-      }},
-      "仓库名2": {{
-        "env": {{...}},
-        "themes": [...],
-        "plugins": [...]
-      }}
-    }}
-
-环境变量说明:
-    index.json 中的 url 字段支持变量，格式: ${{VAR_NAME}}
-    变量来源（优先级从低到高）:
-    1. env 文件中的 [default] 部分（最低优先级）
-    2. index.json 中的 env 数组
-    3. env 文件中的 [global] 部分（覆盖 index.json）
-    4. env 文件中的 [仓库名] 部分（覆盖 global）
-    5. 预设变量: INDEX_BASE_URL, INDEX_DOMAIN（最高优先级）
-
-env 文件格式 (INI):
-    [default]
-    # 最低优先级
-    REPO_BASE=https://github.com/
-    
-    [global]
-    # 覆盖 index.json 的 env
-    REPO_BASE=https://github.com/
-    
-    [myrepo]
-    # 仓库特定配置，覆盖 global
-    REPO_BASE=https://gitee.com/
+    {self.cache_file}          - 本地包缓存（直接保存远程索引）
+    {self.env_file}            - 环境变量配置（安装时动态替换）
 
 示例:
-    # 在线仓库安装（单个）
+    # 更新缓存
     {program_name} update
-    {program_name} list
-    {program_name} list theme
-    {program_name} list plugin
-    {program_name} search git
+    
+    # 安装
     {program_name} install powerlevel10k
+    {program_name} install theme powerlevel10k spaceship
+    {program_name} install plugin zsh-autosuggestions
     
-    # 在线仓库批量安装
-    {program_name} install powerlevel10k zsh-autosuggestions zsh-syntax-highlighting
-    {program_name} install theme powerlevel10k spaceship  # 安装多个主题
-    {program_name} install plugin git zsh-autosuggestions  # 安装多个插件
-    
-    # 手动安装
-    {program_name} install theme https://github.com/romkatv/powerlevel10k.git
-    {program_name} install plugin https://github.com/zsh-users/zsh-autosuggestions.git
-    {program_name} install plugin https://example.com/plugin.zsh file
-    
-    # 手动批量安装
-    {program_name} install theme https://github.com/romkatv/powerlevel10k.git https://github.com/denysdovhan/spaceship-prompt.git
-    {program_name} install plugin https://github.com/zsh-users/zsh-autosuggestions.git https://github.com/zsh-users/zsh-syntax-highlighting.git
-    
-    # 移除
-    {program_name} remove powerlevel10k    # 如果有同名主题和插件会询问
-    {program_name} remove theme spaceship  # 移除主题
-    {program_name} remove plugin git       # 移除插件
-    
-    # 列出已安装的
-    {program_name} list installed
+    # 查看缓存
+    {program_name} show-cache
 """
         print(help_text)
     
@@ -1103,26 +996,19 @@ env 文件格式 (INI):
         elif cmd == 'install':
             if len(args) < 1:
                 print(Colors.red("错误: 请指定要安装的名称或URL"))
-                print(f"用法: {os.path.basename(sys.argv[0])} install <名称1> [名称2] ...")
-                print(f"      {os.path.basename(sys.argv[0])} install theme <名称|URL>... [类型]")
-                print(f"      {os.path.basename(sys.argv[0])} install plugin <名称|URL>... [类型]")
                 return 1
             
             if args[0] in ['theme', 'plugin']:
                 if len(args) < 2:
                     print(Colors.red(f"错误: 请指定要安装的{args[0]}名称或URL"))
                     return 1
-                items_to_install = args[1:]
-                self.install(items_to_install, args[0])
+                self.install(args[1:], args[0])
             else:
                 self.install(args, None)
         
         elif cmd == 'remove':
             if len(args) < 1:
                 print(Colors.red("错误: 请指定要移除的名称"))
-                print(f"用法: {os.path.basename(sys.argv[0])} remove <名称>")
-                print(f"      {os.path.basename(sys.argv[0])} remove theme <名称>")
-                print(f"      {os.path.basename(sys.argv[0])} remove plugin <名称>")
                 return 1
             
             if args[0] in ['theme', 'plugin']:
@@ -1136,7 +1022,6 @@ env 文件格式 (INI):
         elif cmd == 'search':
             if len(args) < 1:
                 print(Colors.red("错误: 请指定搜索关键词"))
-                print(f"用法: {os.path.basename(sys.argv[0])} search <关键词>")
                 return 1
             self.search(args[0])
         
@@ -1148,12 +1033,15 @@ env 文件格式 (INI):
             else:
                 self.list_packages(None)
         
+        elif cmd == 'show-cache':
+            self.show_cache()
+        
         elif cmd in ('help', '--help', '-h'):
             self._show_help()
         
         else:
             print(Colors.red(f"错误: 未知命令 '{cmd}'"))
-            print("可用命令: update, install, remove, search, list, help")
+            print("可用命令: update, install, remove, search, list, show-cache, help")
             self._show_help()
             return 1
         
