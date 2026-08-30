@@ -34,6 +34,7 @@ myzsh theme set powerlevel10k/powerlevel10k
 > Python 3.8 +
 
 > zsh
+
 <br></br>
 ### 下载脚本
 **使用curl**
