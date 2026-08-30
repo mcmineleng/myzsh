@@ -464,15 +464,17 @@ index.json 中的 `url` 字段支持变量替换，格式为 `${VAR_NAME}`。
 
 ```json
 {
-  "env": [
-    {"REPO_BASE": "https://github.com"},
-    {"USER": "zsh-users"}
-  ],
-  "plugins": [
+  "repo": [                                                   {
+      "name": "myzsh",
+      "index": "https://raw.github.com/mcmineleng/myzsh-package/main/myzsh.json"
+    },
     {
-      "id": "zsh-autosuggestions",
-      "url": "https://${REPO_BASE}/${USER}/zsh-autosuggestions",
-      "type": "git"
+      "name": "oh-my-zsh",
+      "index": "https://raw.github.com/mcmineleng/myzsh-package/main/oh-my-zsh.json"
+    },
+    {
+      "name": "awesome-zsh-plugins",
+      "index": "https://raw.github.com/mcmineleng/myzsh-package/main/awesome-zsh-plugins.json"
     }
   ]
 }
