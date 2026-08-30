@@ -474,6 +474,13 @@ index.json 中的 `url` 字段支持变量替换，格式为 `${VAR_NAME}`。
   "env": {
     "REPO_BASE": "https://github.com/"
   },
+  "themes": [
+    {
+      "id": "powerlevel10k",
+      "url": "${REPO_BASE}romkatv/powerlevel10k",
+      "type": "git"
+    }
+  ],
   "plugins": [
     {
       "id": "zsh-syntax-highlighting",
