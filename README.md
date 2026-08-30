@@ -63,7 +63,7 @@ Oh-My-Zsh仓库地址:
 | `OMZ_THEMES_INSTALL` | 是否安装 Oh-My-Zsh 内置主题集 | `true` |
 | `OMZ_PLUGINS_INSTALL` | 是否安装 Oh-My-Zsh 内置插件集 | `true` |
 
----
+***
 
 **标准模式**（保留控制台输出便于日志审计）
 ```shell
@@ -76,7 +76,7 @@ bash myzshinstall > /dev/null
 ```
 > \> /dev/null表示把标准输出给丢弃，会保留错误信息
 
----
+***
 ## 手动安装
 首先创建安装目录
 ```shell
@@ -437,7 +437,7 @@ myzshpack list installed
 myzshpack help
 ```
 
----
+***
 
 # 变量替换功能
 
@@ -483,7 +483,7 @@ REPO_BASE=https://gitee.com
 
 这样同一个 index.json 可以在不同环境下使用不同的仓库源，无需修改索引文件。
 
----
+***
 
 # 常见工作流
 
