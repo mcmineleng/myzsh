@@ -149,9 +149,20 @@ REPO_BASE=https://github.com/
                 break
         
         parsed_url = urlparse(index_url)
+        
+        # 处理 INDEX_BASE_URL: 去掉最后的文件名，保留目录路径
+        # 例如: https://github.com/mcmineleng/myzsh-package/blob/main/myzsh.json
+        # 转换为: https://github.com/mcmineleng/myzsh-package/blob/main/
+        if index_url.endswith('.json'):
+            # 如果是 JSON 文件，去掉文件名部分
+            index_base = index_url.rsplit('/', 1)[0] + '/'
+        else:
+            # 如果不是 JSON 文件，直接使用 URL 本身，但确保以 / 结尾
+            index_base = index_url if index_url.endswith('/') else index_url + '/'
+        
         preset_vars = {
-            'INDEX_BASE_URL': index_url,
-            'INDEX_DOMAIN': f"{parsed_url.scheme}://{parsed_url.netloc}" if parsed_url.scheme else parsed_url.netloc
+            'INDEX_BASE_URL': index_base,
+            'INDEX_DOMAIN': parsed_url.netloc  # 仅域名，不包含协议头
         }
         
         # 4. 合并变量
@@ -163,10 +174,15 @@ REPO_BASE=https://github.com/
         return merged_vars
     
     def _resolve_variables(self, text: str, variables: Dict[str, str]) -> str:
-        """解析字符串中的变量 ${VAR}"""
+        """解析字符串中的变量 ${VAR}，支持嵌套引用"""
         def replace_var(match):
             var_name = match.group(1)
-            return variables.get(var_name, match.group(0))
+            # 递归解析变量值中的变量
+            value = variables.get(var_name, match.group(0))
+            # 如果值中还有变量，继续解析
+            if '${' in value:
+                value = self._resolve_variables(value, variables)
+            return value
         
         pattern = r'\$\{([^}]+)\}'
         result = re.sub(pattern, replace_var, text)
