@@ -5,9 +5,20 @@
 > zsh
 
 <br></br>
-复制此条命令一键安装
+#### 复制命令一键安装
+使用curl
 ```shell
-(curl -O https://sh.mcleng.cn/myzshinstall || wget https://sh.mcleng.cn/myzshinstall) && bash myzshinstall --cli
+curl -O https://sh.mcleng.cn/myzshinstall
+```
+<br></br>
+使用wget
+```shell
+wget https://sh.mcleng.cn/myzshinstall
+```
+<br><br>
+安装
+```shell
+bash myzshinstall --cli
 ```
 <br></br>
 安装一个好看的主题(推荐Powerlevel10k)
