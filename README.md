@@ -23,7 +23,10 @@ bash myzshinstall --cli
 <br></br>
 安装一个好看的主题(推荐Powerlevel10k)
 ```shell
-myzsh theme install powerlevel10k
+myzshpack update
+```
+```shell
+myzshpack theme install powerlevel10k
 ```
 ```shell
 myzsh theme set powerlevel10k/powerlevel10k
