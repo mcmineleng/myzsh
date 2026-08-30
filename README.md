@@ -274,7 +274,8 @@ myzsh edit set /usr/bin/nano
 
 ```shell
 myzsh help
-```# myzshpack包管理CLI
+```
+# myzshpack包管理CLI
 
 ## 功能介绍
 
