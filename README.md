@@ -294,10 +294,17 @@ myzshpack 用于从在线仓库安装/移除主题和插件，支持：
 默认内容：
 ```json
 {
-  "repo": [
+  "repo": [                                                   {
+      "name": "myzsh",
+      "index": "https://raw.github.com/mcmineleng/myzsh-package/main/myzsh.json"
+    },
     {
-      "name": "default",
-      "index": "https://raw.github.com/mcmineleng/myzsh-package/main/index.json"
+      "name": "oh-my-zsh",
+      "index": "https://raw.github.com/mcmineleng/myzsh-package/main/oh-my-zsh.json"
+    },
+    {
+      "name": "awesome-zsh-plugins",
+      "index": "https://raw.github.com/mcmineleng/myzsh-package/main/awesome-zsh-plugins.json"
     }
   ]
 }
@@ -464,17 +471,24 @@ index.json 中的 `url` 字段支持变量替换，格式为 `${VAR_NAME}`。
 
 ```json
 {
-  "repo": [                                                   {
-      "name": "myzsh",
-      "index": "https://raw.github.com/mcmineleng/myzsh-package/main/myzsh.json"
+  "env": {
+    "REPO_BASE": "https://github.com/"
+  },
+  "plugins": [
+    {
+      "id": "zsh-syntax-highlighting",
+      "url": "${REPO_BASE}zsh-users/zsh-syntax-highlighting.git",
+      "type": "git"
     },
     {
-      "name": "oh-my-zsh",
-      "index": "https://raw.github.com/mcmineleng/myzsh-package/main/oh-my-zsh.json"
+      "id": "zsh-autocomplete",
+      "url": "${REPO_BASE}marlonrichert/zsh-autocomplete.git",
+      "type": "git"
     },
     {
-      "name": "awesome-zsh-plugins",
-      "index": "https://raw.github.com/mcmineleng/myzsh-package/main/awesome-zsh-plugins.json"
+      "id": "zsh-autosuggestions",
+      "url": "${REPO_BASE}zsh-users/zsh-autosuggestions.git",
+      "type": "git"
     }
   ]
 }
